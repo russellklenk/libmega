@@ -1,0 +1,221 @@
+Prefetch list (list of files to prefetch)
+Each file is divided up into page-sized chunks.
+Prefetch list comes from 'profiling' runs; not super-useful to us.
+Pages, or a range of pages, can be pinned by the client.
+
+A page in this context has the same size as the OS VMM page.
+A page is identified by (fd, offset, size).
+The status of a page is determined by what list it's in.
+  * A page can be either pinned or not.
+  * A page can be be prefetch but unused.
+  * A page can be prefetch and used, which means it was pinned and then unpinned.
+
+When the application requests a read against a file, a maximum of one page is
+returned at a time. So, the app needs to be designed for streaming - the read
+request may complete immediately with all of the requested data, it may complete
+immediately with some of the requested data, it may complete in the future with
+some of the data, or it may complete in the future with all of the data. Think
+of how asynchronous socket code works.
+
+This is problematic. A read request needs to return only when complete, and if
+the size spans multiple pages, the data needs to be returned in a contiguous
+page range/address space range; for example, we cannot upload data to a texture
+in multiple page chunks (or can we?) The *application* doesn't care if the data
+starts on a page boundary; that restriction is necessary only from the I/O
+system so that it can do a DMA. The flow for a texture might be:
+
+Disk-(DMA)->Page Cache->memcpy to PBO (pinned driver memory)-(DMA)->Device memory
+
+...but a better path might be:
+
+Disk-(DMA)->PBO (pinned driver memory)-(DMA)->Device memory
+
+Because the CPU isn't involved at all in the latter path. In this case, it would
+be up to the application to guarantee that the pinned driver memory starts on a
+page-aligned address, and that the amount to be read is a multiple of the sector
+size. The first is fairly easy to guarantee; the second may not be. What would
+have to happen is:
+
+1. I need to transfer N bytes to the device, give me a pointer.
+2. Align N up to the nearest sector size multiple N_a (>= N), map PBO, return pointer Dst.
+   - Note that N needs to be saved, so we know how much is valid to upload.
+3. Schedule read of (up to) N_a bytes from fd at offset O into Dst with priority P.
+   - Or memcpy from somewhere, or...
+...
+4. Some time later, receive notification that the read has completed.
+   - Note that this should happen on the transfer thread, which has a GL context!
+   - Note that the I/O thread is *not* the transfer thread, so this means that
+     the I/O thread puts the notification into the completion queue, which is
+     polled/waited on by the transfer thread.
+5. Unmap PBO range and flush it.
+   - Note that this happens on the transfer thread.
+6. Execute the H2D transfer from the unmapped PBO range.
+
+Note that *nowhere* does this require a page cache! But, the above approach
+works only if you don't need to transform the incoming data (decompress, etc.)
+and *that* is where the page cache could be helpful:
+
+Disk-(DMA)->Page Cache->Decompress to PBO (pinned driver memory)-(DMA)->Device
+
+Except that in the case of our data, it's even more complex:
+
+Disk-(DMA)->Page Cache->Lossless Decompress->IDCT->PBO-(DMA)->Device
+
+So really, what we want are the following:
+
+Disk-(DMA)->Page Cache
+Page Cache->Scratch (general transform, wide memcpy)
+Scratch->Scratch (general transform, wide memcpy)
+Scratch->GLBuffer (for DMA to device, wide memcpy)
+Page Cache->GLBuffer (general transform, wide memcpy)
+
+Each of those types has the following alignment requirements:
+
+Page Cache: Page-aligned, page size multiple of disk block size (stat.st_blksize)
+  - This is implicitly acceptable alignment for CPU SIMD transformation.
+
+Scratch: CPU SIMD-aligned, no size restriction.
+
+GLBuffer: CPU SIMD-aligned, no size restriction.
+
+You might say 'Why not just DMA directly to GLBuffer?'
+  - There is no guarantee that mapped buffer will be page-aligned (though likely)
+  - Storing data compressed on disk is almost guaranteed to be a significant win.
+
+So, I/O should be performed into a caller-supplied target buffer. The read call
+verifies only that:
+  - The target buffer is page-aligned.
+  - The transfer size is a multiple of the disk block size.
+
+This simplifies the I/O system considerably. For Windows info, see:
+http://msdn.microsoft.com/en-us/library/windows/desktop/cc644950(v=vs.85).aspx
+  - Call GetFileInformationByHandleEx with FILE_STORAGE_INFO, which has fields
+    PhysicalBytesPerSectorForAtomicity and PhysicalBytesPerSectorForPerformance
+All the file needs to do is order the read operations.
+
+The next bit of craziness comes with the scratch allocator. Satisfying the
+alignment requirement is easy enough, but it basically has to function as a
+general purpose heap; there is no guarantee of the order of allocs and frees,
+or of the lifetime of the scratch memory, so we can't use a stack allocator...
+or can we? A double-ended stack allocator could be used, with one end being for
+frame allocations and the other being for lifetime allocations.
+
+We should *probably* just go out to the system heap by default, but allow the
+underlying allocation mechanism to be swapped out. Scratch allocations should
+probably be aligned to page boundaries (not a requirement) and be multiples of
+the page size (also not a requirement) in which case the VMM allocator could
+be used.
+
+Still need to answer the basic question - what do reads look like from the
+perspective of the application?
+  - io_read_direct(fd, offset, size, priority, buffer, iocq, id).
+  - when complete, the id is placed into the completion queue.
+  - would like the completion queue to be waitable or pollable.
+  - must call io_read_complete(fd, id) to get (offset, size, buffer).
+  - reads must be searchable by offset (returned by priority queue).
+  - reads must be searchable by id (from io_read_complete).
+
+The producer of these read operations will be the page cache; we need a simpler
+interface for the actual client application:
+  - uintptr_t io_open(io_page_cache_t *cache, char const *file_path)
+  - void io_seek(cache, fd, offset, mode, pc)
+  - void io_read(cache, fd, size, id, callback?)
+    - goes to page cache...
+      - if hit, complete immediately
+      - else, allocate contiguous page range and schedule direct I/O
+  - void io_close(fd)
+  - void io_poll_events(void)
+  - void io_wait_events(void)
+
+This seems like a *terrible* interface. There's a completion queue, but who
+polls it?
+
+It seems like we have the following problems:
+  - How to associate a file with a page cache?
+  - How to identify an I/O operation.
+  - How to indicate completion of an I/O operation?
+    - Callback
+    - Notify queue
+      - Waitable?
+      - Pollable?
+      - Both? Yes!
+    - Both? Yes!
+
+Maybe the concept of a file should be separate from that of a cache, and the
+basic I/O functions just wrap the OS-native functions with an async interface,
+though a synchronous interface should be provided as well.
+
+Then, we can have a method to associate a fd with a page cache, so that it will
+use the page cache as the target buffer, etc. The page cache provides the same
+async interface as the file does.
+
+I hate to say it, but this sounds like it would fit well with OOP and
+encapsulation into the following classes:
+  - file_t: Synchronous and asynchronous file I/O. Minor complication in that
+            on *nix, direct I/O requires int fd, while buffered I/O requires
+            a FILE*. Use fdopen() if a buffered I/O operation is requested; on
+            windows, look at _fdopen, _fileno, _get_osfhandle, _open_osfhandle.
+            Windows is nicer though, as we can just use a HANDLE for both. The
+            buffered I/O interfaces are always synchronous, while direct I/O
+            interfaces are provided for both synchronous and asynchronous.
+            Since this is a little more complex than can be handled by #ifdef,
+            better to have separate implementations. The same file can also
+            include the implementation of notify_queue_t. A little C interface
+            sits in front of this, ie.:
+              file_t* io_open(char const *filepath, int32_t flags)
+                - Just does a new file_t of the correct OS type, etc.
+              and so on, to be similar to stdio.
+  - notify_queue_t: A waitable/poll-able asynchronous event notification queue
+                    designed for use as single producer, single consumer.
+  - page_cache_t: Provides the same interface as file_t, but uses a page cache.
+                  Should be used for streaming reads only.
+
+What does a notify queue do in this case?
+
+I/O thread is the producer, when I/O operation is completed, it enqueues an
+item describing the completed request and containing the following data:
+  - The application-specified uintptr_t id.
+  - The application-specified context pointer.
+  - The file_t* from which the data was read.
+  - The byte offset at which the operation began.
+  - The number of bytes which were transferred.
+  - A pointer to the source or destination buffer.
+
+The I/O thread performs blocking I/O and then enqueues the result in the notify
+queue. But since the I/O is blocking, this implies that a queue is used to
+submit I/O requests from another thread...more complication.
+
+The consumer is the decompression thread. It polls the notify queue, and if any
+reads have completed, performs the decompression process.
+
+We need to stop lib-ifying this, and just come up with an implementation that
+meets our current needs. Otherwise, nothing is ever going to get done.
+
+We will use LZ4 for lossless data compression, which on "typical" data can get
+the data size down to about 60% of the original, but hopefully with our lossy
+compression and data reorganization, we can do a bit better. The implementation
+consists of a single header and source file; compression is fast (~400MB/s) and
+decompression is extremely fast (close to the speed of a memcpy.) See some blog
+postings by cbloom on ideas to make it better:
+
+  - http://cbloomrants.blogspot.com/2012/09/09-10-12-lz4-large-window.html
+  - The 'Encoding Values in Bytes' postings.
+  - The LZ4 optimal parse posting.
+
+Also, there looks to be some code in there that can be eliminated because we
+can make assumptions like forcing buffers to be aligned, no big endian, etc.
+The source file is < 900 LOC including whitespace, conditional compiler
+directives, etc. and that includes both the compressor *and* decompressor. The
+whole thing ought to be reduced by a few hundred lines at least by removing
+the unnecessary stuff. The re-implementation should be done in C. It is
+absolutely necessary to have this in place, and it's pretty much stand-alone
+like the DCT/IDCT stuff.
+
+Finally, we need to design a package file format. Each file within the package
+gets padded out to the nearest multiple of the page size. This ensures that
+the files start on a sector boundary, and have sizes that are even multiples
+of the disk sector size.
+
+To start, just implement the synchronous file_t interface for POSIX, port LZ4,
+and implement the page cache against the synchronous interface. Then worry
+about adding the command queues for the asynchronous interfaces, Win32 support.
