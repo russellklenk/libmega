@@ -1,0 +1,65 @@
+# see http://www.jukie.net/bart/blog/makefile-template
+GLEW_TARGET := libglew.a
+GLEW_SRCS   := GL/glew.c
+GLEW_OBJS   := ${GLEW_SRCS:.c=.o}
+GLEW_DEPS   := ${GLEW_SRCS:.c=.dep}
+GLEW_CCFLAGS = -fstrict-aliasing -O3 -Wall -Werror -Wextra -ggdb
+
+LIB_TARGET  := libmega.a
+LIB_SRCS    := vmalloc.cpp ioutils.cpp ioutils_posix.cpp imutils.cpp
+LIB_OBJS    := ${LIB_SRCS:.cpp=.o}
+LIB_DEPS    := ${LIB_SRCS:.cpp=.dep}
+LIB_CCFLAGS  = -fstrict-aliasing -O3 -Wall -Wextra -ggdb
+LIB_LDFLAGS  =
+LIB_LIBS     =
+
+EXE_TARGET  := testapp
+EXE_SRCS    := main.cpp
+EXE_OBJS    := ${EXE_SRCS:.cpp=.o}
+EXE_DEPS    := ${EXE_SRCS:.cpp=.dep}
+EXE_CCFLAGS  = -fstrict-aliasing -O3 -Wall -Wextra -ggdb
+EXE_LDFLAGS  = -L./
+EXE_LIBS     = -lstdc++ -lm
+#EXE_LIBS     = -lstdc++ -lm -lglfw3 -lglew -lmega -framework Cocoa -framework OpenGL -framework IOKit
+
+.PHONY: all clean distclean lib glew test
+
+all:: ${LIB_TARGET} ${GLEW_TARGET} ${EXE_TARGET}
+
+${GLEW_TARGET}: ${GLEW_OBJS}
+	ar rcs $@ $^
+
+${GLEW_OBJS}: %.o: %.c %.dep
+	${CC} ${GLEW_CCFLAGS} -o $@ -c $<
+
+${GLEW_DEPS}: %.dep: %.c Makefile.osx
+	${CC} ${GLEW_CCFLAGS} -MM $< > $@
+
+${LIB_TARGET}: ${LIB_OBJS}
+	ar rcs $@ $^
+
+${LIB_OBJS}: %.o: %.cpp %.dep
+	${CC} ${LIB_CCFLAGS} -o $@ -c $<
+
+${LIB_DEPS}: %.dep: %.cpp Makefile.osx
+	${CC} ${LIB_CCFLAGS} -MM $< > $@
+
+${EXE_TARGET}: ${EXE_OBJS}
+	${CC} ${EXE_LDFLAGS} -o $@ $^ ${EXE_LIBS}
+
+${EXE_OBJS}: %.o: %.cpp %.dep
+	${CC} ${EXE_CCFLAGS} -o $@ -c $<
+
+${EXE_DEPS}: %.dep: %.cpp Makefile.osx
+	${CC} ${EXE_CCFLAGS} -MM $< > $@
+
+lib:: ${LIB_TARGET}
+
+glew:: ${GLEW_TARGET}
+
+test:: ${EXE_TARGET} ${LIB_TARGET}
+
+clean::
+	-rm -f *~ *.o *.dep *.tga GL/*~ GL/*.o GL/*.dep ${LIB_TARGET} ${GLEW_TARGET} ${EXE_TARGET}
+
+distclean:: clean
