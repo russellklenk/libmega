@@ -24,6 +24,15 @@
 /*////////////////
 //  Data Types  //
 ////////////////*/
+/// see jdct.h, jddctmgr.c, jmorecfg.h, jpegint.h
+#define DCTINT_ONE           ((int32_t) 1)
+#define DCTINT_SCALE_BITS    2U
+#define DCTINT_CONST_BITS    14U
+#define DCTINT_CONST_SCALE   (DCTINT_ONE     << DCTINT_CONST_BITS)
+#define DCTINT_FIX(x)        (((int32_t) ((x) * DCTINT_CONST_SCALE + 0.5))
+#define DCTINT_DESCALE(x,n)  (((x) + (DCTINT_ONE << ((n)-1))) >> (n)
+#define DCTINT_MULTIPLY(a,b) (((int16_t) (a)) * ((int16_t) (b)))
+
 /// @summary A lookup table of array indices used to access DCT coefficients
 /// in zig-zag order, post-FDCT. Accessing the coefficients in zig-zag order
 /// increases the length of runs of zeroes.
@@ -81,8 +90,10 @@ static const int16_t JPEGChromaQuant[64] =
     99,  99,  99,  99,   99,  99,  99,  99
 };
 
-/// @summary AA&N scale factor values.
-static const float AANScaleFactor[8] =
+/// @summary AA&N scale factor values. The scale factors are computed as:
+/// AANScaleFactor[0] = 1.0
+/// AANScaleFactor[k] = cos(k*PI/16) * sqrt(2) for k in [1, 7]
+static const float AANScaleFactor_float[8] = 
 {
     1.0f, 1.387039845f, 1.306562965f, 1.175875602f,
     1.0f, 0.785694958f, 0.541196100f, 0.275899379f
@@ -91,7 +102,7 @@ static const float AANScaleFactor[8] =
 /// @summary AA&N scale factors for inverse DCT. These are the values that
 /// are output if you specify a Qtable = NULL (or all 1.0f) to the function
 /// aan_scaled_qtable(), and result in a unitary transform.
-static const float AAN_IDCT_Factors[64] =
+static const float AAN_IDCT_Factors_float[64] = 
 {
     0.12500f, 0.17338f, 0.16332f, 0.14698f, 0.12500f, 0.09821f, 0.06765f, 0.03449f,
     0.17338f, 0.24048f, 0.22653f, 0.20387f, 0.17338f, 0.13622f, 0.09383f, 0.04784f,
@@ -106,7 +117,7 @@ static const float AAN_IDCT_Factors[64] =
 /// @summary AA&N scale factors for forward DCT. These are the values that
 /// are output if you specify a Qtable = NULL (or all 1.0f) to the function
 /// aan_scaled_qtable(), and result in a unitary transform.
-static const float AAN_FDCT_Factors[64] =
+static const float AAN_FDCT_Factors_float[64] = 
 {
     0.12500f, 0.09012f, 0.09567f, 0.10630f, 0.12500f, 0.15909f, 0.23097f, 0.45306f,
     0.09012f, 0.06497f, 0.06897f, 0.07664f, 0.09012f, 0.11470f, 0.16652f, 0.32664f,
@@ -118,12 +129,25 @@ static const float AAN_FDCT_Factors[64] =
     0.45306f, 0.32664f, 0.34676f, 0.38530f, 0.45306f, 0.57664f, 0.83715f, 1.64213f
 };
 
+/// Pre-computed values scaled up by 14 bits.
+static const int16_t AAN_Factors_int16[64] =
+{
+    16384, 22725, 21407, 19266, 16384, 12873,  8867,  4520,
+    22725, 31521, 29692, 26722, 22725, 17855, 12299,  6270,
+    21407, 29692, 27969, 25172, 21407, 16819, 11585,  5906,
+    19266, 26722, 25172, 22654, 19266, 15137, 10426,  5315,
+    16384, 22725, 21407, 19266, 16384, 12873,  8867,  4520,
+    12873, 17855, 16819, 15137, 12873, 10114,  6967,  3552,
+     8867, 12299, 11585, 10426,  8867,  6967,  4799,  2446,
+     4520,  6270,  5906,  5315,  4520,  3552,  2446,  1247
+};
+
 /// @summary The Contrast Sensitivity Function coefficients for the luma
 /// channel, for the base JPEG luma quantization table JPEGLumaQuant. They are
 /// calculated from the quantization table Q using  CSF[i] = Q[0] / Q[i] and
 /// represent the ratio of the AC coefficient to the DC coefficient. The values
 /// in this table are also stored in zig-zag order.
-static const float CSFLuma[64] =
+static const float CSFLuma_float[64] = 
 {
     1.000000f, 1.454545f, 1.600000f, 1.000000f, 0.666667f, 0.400000f, 0.313726f, 0.262295f,
     1.333333f, 1.333333f, 1.142857f, 0.842105f, 0.615385f, 0.275862f, 0.266667f, 0.290909f,
@@ -140,7 +164,7 @@ static const float CSFLuma[64] =
 /// are calculated from the quantization table Q using  CSF[i] = Q[0] / Q[i]
 /// and represent the ratio of the AC coefficient to the DC coefficient. The
 /// values in this table are also stored in zig-zag order.
-static const float CSFChroma[64] =
+static const float CSFChroma_float[64] = 
 {
     1.000000f, 0.944444f, 0.708333f, 0.361702f, 0.171717f, 0.171717f, 0.171717f, 0.171717f,
     0.944444f, 0.809524f, 0.653846f, 0.257576f, 0.171717f, 0.171717f, 0.171717f, 0.171717f,
@@ -153,7 +177,7 @@ static const float CSFChroma[64] =
 };
 
 /// @summary The result of multiplying the AAN_FDCT_Factors against CSFLuma.
-static const float FDCTLuma[64] =
+static const float FDCTLuma_float[64] = 
 {
     0.125000f, 0.131084f, 0.153072f, 0.106300f, 0.083333f, 0.063636f, 0.072461f, 0.118835f,
     0.120160f, 0.086627f, 0.078823f, 0.064539f, 0.055458f, 0.031641f, 0.044405f, 0.095023f,
@@ -166,7 +190,7 @@ static const float FDCTLuma[64] =
 };
 
 /// @summary The result of multiplying the AAN_FDCT_Factors against CSFChroma.
-static const float FDCTChroma[64] =
+static const float FDCTChroma_float[64] = 
 {
     0.125000f, 0.085113f, 0.067766f, 0.038449f, 0.021465f, 0.027318f, 0.039661f, 0.077798f,
     0.085113f, 0.052595f, 0.045096f, 0.019741f, 0.015475f, 0.019696f, 0.028594f, 0.056090f,
@@ -431,13 +455,13 @@ static void csf_from_qtable(
 /// @param CSFTable A 64-element array specifying the Contrast Sensitivity
 /// Function coefficients generated from the quantization table such as those
 /// generated from the csf_from_qtable() function.
-static void aan_scaled_qtable(
+static void aan_scaled_qtable_float(
     float       * restrict Qidct,
     float       * restrict Qfdct,
     float const * restrict CSFtable)
 {
     #define DCTSIZE 8U
-    float const * restrict AAN = AANScaleFactor;
+    float const * restrict AAN = AANScaleFactor_float;
     size_t  i = 0;
     for (size_t r = 0; r < DCTSIZE; ++r)
     {
@@ -453,16 +477,238 @@ static void aan_scaled_qtable(
     }
 }
 
+static void aan_scaled_qtable_int16(
+    int16_t       * restrict Qidct, 
+    int16_t       * restrict Qfdct, 
+    int16_t const * restrict Qtable)
+{
+    #define DCTSIZE 8U
+    #define DCTINT_ONE           ((int32_t) 1)
+    #define DCTINT_SCALE_BITS    2U
+    #define DCTINT_CONST_BITS    14U
+    #define DCTINT_CONST_SCALE   (DCTINT_ONE     << DCTINT_CONST_BITS)
+    #define DCTINT_FIX(x)        (((int32_t) ((x) * DCTINT_CONST_SCALE + 0.5))
+    #define DCTINT_DESCALE(x,n)  (((x) + (DCTINT_ONE << ((n)-1))) >> (n)
+    #define DCTINT_MULTIPLY(a,b) (((int16_t) (a)) * ((int16_t) (b)))
+
+    int16_t const * restrict AAN = AAN_IDCT_Factors_int16;
+    for (size_t i = 0; i < DCTSIZE * DCTSIZE; ++i)
+    {
+        int16_t q    = Qtable ? Qtable[i] : 16384;
+        int16_t qaan = AAN[i] * q;
+        Qidct[i]     = DCTINT_DESCALE(qaan, 11); // CONST_BITS-SCALE_BITS-1
+    }
+}
+
+/// @summary Performs a 2D forward DCT on an 8x8 block of a single channel.
+/// This is performed after the RGBA pixels are converted to YCoCg, and after
+/// subsampling to 4:2:0, so this routine is called four times for luma and
+/// one time for each of the chroma channels. The output coefficients are not 
+/// quantized, and are scaled by a factor of 8 to the range [-8192, +8192].
+/// @param dst A 64-element array to be filled with quantized DCT coefficients.
+/// @param src A 64-element array representing an 8x8 block of input samples.
+static void fdct8x8f(float * restrict dst, float const * restrict src)
+{
+    #define DCTSIZE     8U
+    #define f13         0.707106781f
+    #define f05         0.382683433f
+    #define f02         0.541196100f
+    #define f04         1.306563965f
+
+    float const *inp = (float const*) src;
+    float       *out = (float*) dst;
+    
+    for (int i = DCTSIZE - 1; i >= 0; --i)
+    {
+        // process rows in the input.
+        float t00 = inp[0] + inp[7];
+        float t07 = inp[0] - inp[7];
+        float t01 = inp[1] + inp[6];
+        float t06 = inp[1] - inp[6];
+        float t02 = inp[2] + inp[5];
+        float t05 = inp[2] - inp[5];
+        float t03 = inp[3] + inp[4];
+        float t04 = inp[3] - inp[4];
+        float t10 = t00    + t03;
+        float t13 = t00    - t03;
+        float t11 = t01    + t02;
+        float t12 = t01    - t02;
+        out[0]    = t10    + t11;
+        out[4]    = t10    - t11;
+        float z01 =(t12    + t13) * f13;
+        out[2]    = t13    + z01;
+        out[6]    = t13    - z01;
+        t10       = t04    + t05;
+        t11       = t05    + t06;
+        t12       = t06    + t07;
+        float z05 =(t10    - t12) * f05;
+        float z02 = f02    * t10  + z05;
+        float z04 = f04    * t12  + z05;
+        float z03 = f13    * t11;
+        float z11 = t07    + z03;
+        float z13 = t07    - z03;
+        out[5]    = z13    + z02;
+        out[3]    = z13    - z02;
+        out[1]    = z11    + z04;
+        out[7]    = z11    - z04;
+        out      += DCTSIZE;
+        inp      += DCTSIZE;
+    }
+    
+    out = dst;
+    for (int i = DCTSIZE - 1; i >= 0; --i)
+    {
+        // process columns in the input.
+        float t00 = out[DCTSIZE * 0] + out[DCTSIZE * 7];
+        float t07 = out[DCTSIZE * 0] - out[DCTSIZE * 7];
+        float t01 = out[DCTSIZE * 1] + out[DCTSIZE * 6];
+        float t06 = out[DCTSIZE * 1] - out[DCTSIZE * 6];
+        float t02 = out[DCTSIZE * 2] + out[DCTSIZE * 5];
+        float t05 = out[DCTSIZE * 2] - out[DCTSIZE * 5];
+        float t03 = out[DCTSIZE * 3] + out[DCTSIZE * 4];
+        float t04 = out[DCTSIZE * 3] - out[DCTSIZE * 4];
+        float t10 = t00 + t03;
+        float t13 = t00 - t03;
+        float t11 = t01 + t02;
+        float t12 = t01 - t02;
+        out[DCTSIZE*0]  = t10   + t11;
+        out[DCTSIZE*4]  = t10   - t11;
+        float z01 =(t12 + t13)  * f13;
+        out[DCTSIZE*2]  = t13   + z01;
+        out[DCTSIZE*6]  = t13   - z01;
+        t10       = t04 + t05;
+        t11       = t05 + t06;
+        t12       = t06 + t07;
+        float z05 =(t10 - t12)  * f05;
+        float z02 = f02 * t10   + z05;
+        float z04 = f04 * t12   + z05;
+        float z03 = f13 * t11;
+        float z11 = t07 + z03;
+        float z13 = t07 - z03;
+        out[DCTSIZE*5]  = z13   + z02;
+        out[DCTSIZE*3]  = z13   - z02;
+        out[DCTSIZE*1]  = z11   + z04;
+        out[DCTSIZE*7]  = z11   - z04;
+        out++;
+    }
+}
+
+/// @summary Performs a 2D forward DCT on an 8x8 block of a single channel.
+/// This is performed after the RGBA pixels are converted to YCoCg, and after
+/// subsampling to 4:2:0, so this routine is called four times for luma and
+/// one time for each of the chroma channels. The output coefficients are not 
+/// quantized, and are scaled by a factor of 8. This integer DCT is not 
+/// perfectly reversable. For more information, see the following:
+/// http://fgiesen.wordpress.com/2013/11/04/bink-2-2-integer-dct-design-part-1/
+/// http://fgiesen.wordpress.com/2013/11/10/bink-2-2-integer-dct-design-part-2/
+/// https://github.com/rygorous/dct_blog/blob/master/bink_dct_B2.m
+/// @param dst A 64-element array to be filled with quantized DCT coefficients.
+/// @param src A 64-element array representing an 8x8 block of input samples.
+static void fdct8x8i(int16_t * restrict dst, int16_t const * restrict src)
+{
+    #define DCTSIZE 8U
+
+    int16_t const *inp = (int16_t const*) src;
+    int16_t       *out = (int16_t*) dst;
+
+    for (int i = DCTSIZE - 1; i >= 0; --i)
+    {
+        // process rows in the input.
+        int32_t a0 = inp[0] + inp[7];
+        int32_t a4 = inp[0] - inp[7];
+        int32_t a1 = inp[1] + inp[6];
+        int32_t a5 = inp[1] - inp[6];
+        int32_t a2 = inp[2] + inp[5];
+        int32_t a6 = inp[2] - inp[5];
+        int32_t a3 = inp[3] + inp[4];
+        int32_t a7 = inp[3] - inp[4];
+        int32_t b0 = a0  +  a3;
+        int32_t b2 = a0  -  a3;
+        int32_t b1 = a1  +  a2;
+        int32_t b3 = a1  -  a2;
+        int32_t c0 = b0  +  b1;
+        int32_t c1 = b0  -  b1;
+        int32_t c2 = b2  + (b2 >> 2) + (b3 >> 1);
+        int32_t c3 =(b2 >> 1)  - b3  - (b3 >> 2);
+        int32_t b4 =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
+        int32_t b7 =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
+        int32_t b5 = a5        + a6  - (a6 >> 2) - (a6 >> 4);
+        int32_t b6 = a6        - a5  + (a5 >> 2) + (a5 >> 4);
+        int32_t c4 = b4  +  b5;
+        int32_t c5 = b4  -  b5;
+        int32_t c6 = b6  +  b7;
+        int32_t c7 = b6  -  b7;
+        int32_t d4 = c4;
+        int32_t d5 = c5  +  c7;
+        int32_t d6 = c5  -  c7;
+        int32_t d7 = c6;
+        out[0] = (int16_t)  c0;
+        out[1] = (int16_t)  d4;
+        out[2] = (int16_t)  c2;
+        out[3] = (int16_t)  d6;
+        out[4] = (int16_t)  c1;
+        out[5] = (int16_t)  d5;
+        out[6] = (int16_t)  c3;
+        out[7] = (int16_t)  d7;
+        out   +=  DCTSIZE;
+        inp   +=  DCTSIZE;
+    }
+
+    out = dst;
+    for (int i = DCTSIZE - 1; i >= 0; --i)
+    {
+        // process columns in the input.
+        int32_t a0 = out[DCTSIZE * 0] + out[DCTSIZE * 7];
+        int32_t a4 = out[DCTSIZE * 0] - out[DCTSIZE * 7];
+        int32_t a1 = out[DCTSIZE * 1] + out[DCTSIZE * 6];
+        int32_t a5 = out[DCTSIZE * 1] - out[DCTSIZE * 6];
+        int32_t a2 = out[DCTSIZE * 2] + out[DCTSIZE * 5];
+        int32_t a6 = out[DCTSIZE * 2] - out[DCTSIZE * 5];
+        int32_t a3 = out[DCTSIZE * 3] + out[DCTSIZE * 4];
+        int32_t a7 = out[DCTSIZE * 3] - out[DCTSIZE * 4];
+        int32_t b0 = a0  +  a3;
+        int32_t b2 = a0  -  a3;
+        int32_t b1 = a1  +  a2;
+        int32_t b3 = a1  -  a2;
+        int32_t c0 = b0  +  b1;
+        int32_t c1 = b0  -  b1;
+        int32_t c2 = b2  + (b2 >> 2) + (b3 >> 1);
+        int32_t c3 =(b2 >> 1)  - b3  - (b3 >> 2);
+        int32_t b4 =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
+        int32_t b7 =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
+        int32_t b5 = a5        + a6  - (a6 >> 2) - (a6 >> 4);
+        int32_t b6 = a6        - a5  + (a5 >> 2) + (a5 >> 4);
+        int32_t c4 = b4  +  b5;
+        int32_t c5 = b4  -  b5;
+        int32_t c6 = b6  +  b7;
+        int32_t c7 = b6  -  b7;
+        int32_t d4 = c4;
+        int32_t d5 = c5  +  c7;
+        int32_t d6 = c5  -  c7;
+        int32_t d7 = c6;
+        out[DCTSIZE * 0] = (int16_t) c0;
+        out[DCTSIZE * 1] = (int16_t) d4;
+        out[DCTSIZE * 2] = (int16_t) c2;
+        out[DCTSIZE * 3] = (int16_t) d6;
+        out[DCTSIZE * 4] = (int16_t) c1;
+        out[DCTSIZE * 5] = (int16_t) d5;
+        out[DCTSIZE * 6] = (int16_t) c3;
+        out[DCTSIZE * 7] = (int16_t) d7;
+        out++;
+    }
+}
+
 /// @summary Performs a 2D forward DCT on an 8x8 block of a single channel.
 /// This is performed after the RGBA pixels are converted to YCoCg, and after
 /// subsampling to 4:2:0, so this routine is called four times for luma and
 /// one time for each of the chroma channels. Additionally, the output DCT
-/// coefficients are quantized and descaled.
+/// coefficients are quantized and descaled; the output coefficient values have
+/// the range [-1024, 1023] for 8-bit input values.
 /// @param dst A 64-element array to be filled with quantized DCT coefficients.
 /// @param src A 64-element array representing an 8x8 block of input.
 /// @param quant The 64-element scaled quantization coefficient array, as
 /// output by the aan_scaled_qtable() function.
-static void fdct_quantize(
+static void fdct8x8fq(
     float       * restrict dst,
     float const * restrict src,
     float const * restrict quant)
@@ -497,7 +743,7 @@ static void fdct_quantize(
         out[2]    = t13    + z01;
         out[6]    = t13    - z01;
         t10       = t04    + t05;
-        t11       = t05    - t06;
+        t11       = t05    + t06;
         t12       = t06    + t07;
         float z05 =(t10    - t12) * f05;
         float z02 = f02    * t10  + z05;
@@ -555,56 +801,48 @@ static void fdct_quantize(
         dst[i] *= quant[i];
 }
 
-/// @summary Dequantizes and performs an inverse 2D DCT on an 8x8 block of
-/// quantized DCT coefficients to retrieve sample values.
+/// @summary Performs an inverse 2D DCT on an 8x8 block of DCT coefficients to
+/// retrieve sample values. The DCT coefficients are assumed to have been 
+/// de-quantized, and to have been scaled by a factor of 8.
 /// @summary dst A 64-element array where the output will be written.
 /// @summary src A 64-element array of quantized DCT coefficient values.
-/// @summary quant The 64-element scaled quantization coefficient array, as
-/// output by the aan_scaled_qtable() function.
-static void idct_dequantize(
-   float       * restrict dst,
-   float const * restrict src,
-   float const * restrict quant)
+static void idct8x8f(float * restrict dst, float const * restrict src)
 {
-    #define DCTSIZE    8U
-    #define COLUMN(i) (inp[DCTSIZE * i] * qtp[DCTSIZE * i])
-    #define i13        1.414213562f
-    #define i11        1.414213562f
-    #define i05        1.847759065f
-    #define i10        1.08239220f
-    #define i12       -2.61312593f
+    #define DCTSIZE     8U
+    #define COLUMNF(i) (inp[DCTSIZE*i])
+    #define i13         1.414213562f
+    #define i11         1.414213562f
+    #define i05         1.847759065f
+    #define i10         1.08239220f
+    #define i12        -2.61312593f
 
     float        workspace[64];
-    float const *qtp = (float const*) quant;
     float const *inp = (float const*) src;
     float       *wsp = (float*) workspace;
 
     for (size_t i = DCTSIZE; i > 0; --i)
     {
         // process columns from the input; write the result to workspace.
-        float t00 = COLUMN(0);
-        float t01 = COLUMN(2);
-        float t02 = COLUMN(4);
-        float t03 = COLUMN(6);
+        float t00 = COLUMNF(0);
+        float t01 = COLUMNF(2);
+        float t02 = COLUMNF(4);
+        float t03 = COLUMNF(6);
         float t10 = t00 + t02;
         float t11 = t00 - t02;
         float t13 = t01 + t03;
         float t12 =(t01 - t03) * i13 - t13;
-
         t00 = t10 + t13;
         t03 = t10 - t13;
         t01 = t11 + t12;
         t02 = t11 - t12;
-
-        float t04 = COLUMN(1);
-        float t05 = COLUMN(3);
-        float t06 = COLUMN(5);
-        float t07 = COLUMN(7);
+        float t04 = COLUMNF(1);
+        float t05 = COLUMNF(3);
+        float t06 = COLUMNF(5);
+        float t07 = COLUMNF(7);
         float z13 = t06  + t05;
         float z10 = t06  - t05;
         float z11 = t04  + t07;
         float z12 = t04  - t07;
-
         t07 = z11 + z13;
         t11 =(z11 - z13) * i11;
         float z05 =(z10  + z12) * i05;
@@ -613,7 +851,6 @@ static void idct_dequantize(
         t06 = t12 - t07;
         t05 = t11 - t06;
         t04 = t10 + t05;
-
         wsp[DCTSIZE * 0] = t00 + t07;
         wsp[DCTSIZE * 1] = t01 + t06;
         wsp[DCTSIZE * 2] = t02 + t05;
@@ -622,9 +859,7 @@ static void idct_dequantize(
         wsp[DCTSIZE * 5] = t02 - t05;
         wsp[DCTSIZE * 6] = t01 - t06;
         wsp[DCTSIZE * 7] = t00 - t07;
-
         wsp++;
-        qtp++;
         inp++;
     }
 
@@ -653,7 +888,218 @@ static void idct_dequantize(
         float t06 = t12    - t07;
         float t05 = t11    - t06;
         float t04 = t10    + t05;
+        dst[0] = t00 + t07;
+        dst[7] = t00 - t07;
+        dst[1] = t01 + t06;
+        dst[6] = t01 - t06;
+        dst[2] = t02 + t05;
+        dst[5] = t02 - t05;
+        dst[4] = t03 + t04;
+        dst[3] = t03 - t04;
+        dst   += DCTSIZE;
+        wsp   += DCTSIZE;
+    }
+}
 
+/// @summary Performs an inverse 2D DCT on an 8x8 block of DCT coefficients to
+/// retrieve sample values. The DCT coefficients are assumed to have been 
+/// de-quantized, and to have been scaled by a factor of 8. This inverse DCT 
+/// scales the sample values by a factor of 8, resulting in a scale of 64. The 
+/// integer DCT is not perfectly reversable. For more information, see:
+/// http://fgiesen.wordpress.com/2013/11/04/bink-2-2-integer-dct-design-part-1/
+/// http://fgiesen.wordpress.com/2013/11/10/bink-2-2-integer-dct-design-part-2/
+/// https://github.com/rygorous/dct_blog/blob/master/bink_idct_B2_partial.m
+/// @summary dst A 64-element array where the output will be written.
+/// @summary src A 64-element array of de-quantized DCT coefficient values.
+static void idct8x8i(int16_t * restrict dst, int16_t const * restrict src)
+{
+    #define DCTSIZE       8U
+    #define COLUMNI(i)   (inp[DCTSIZE*i])
+
+    int16_t        workspace[64];
+    int16_t const *inp = (int16_t const*) src; 
+    int16_t       *wsp = (int16_t*) workspace;
+
+    for (size_t i = DCTSIZE; i > 0; --i)
+    {
+        // process columns from the input; write the result to workspace.
+        int16_t c0 = COLUMNI(0);
+        int16_t d4 = COLUMNI(1);
+        int16_t c2 = COLUMNI(2);
+        int16_t d6 = COLUMNI(3);
+        int16_t c1 = COLUMNI(4);
+        int16_t d5 = COLUMNI(5);
+        int16_t c3 = COLUMNI(6);
+        int16_t d7 = COLUMNI(7);
+        int16_t c4 = d4;
+        int16_t c5 = d5 + d6;
+        int16_t c7 = d5 - d6;
+        int16_t c6 = d7;
+        int16_t b4 = c4 + c5;
+        int16_t b5 = c4 - c5;
+        int16_t b6 = c6 + c7;
+        int16_t b7 = c6 - c7;
+        int16_t b0 = c0 + c1;
+        int16_t b1 = c0 - c1;
+        int16_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
+        int16_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
+        int16_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
+        int16_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
+        int16_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
+        int16_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
+        int16_t a0 = b0 + b2;
+        int16_t a3 = b0 - b2;
+        int16_t a1 = b1 + b3;
+        int16_t a2 = b1 - b3;
+        wsp[DCTSIZE*0]  = a0 + a4;
+        wsp[DCTSIZE*1]  = a1 + a5;
+        wsp[DCTSIZE*2]  = a2 + a6;
+        wsp[DCTSIZE*3]  = a3 + a7;
+        wsp[DCTSIZE*4]  = a3 - a7;
+        wsp[DCTSIZE*5]  = a2 - a6;
+        wsp[DCTSIZE*6]  = a1 - a5;
+        wsp[DCTSIZE*7]  = a0 - a4;
+        wsp++;
+        inp++;
+    }
+
+    wsp = workspace;
+    for (size_t i = 0; i < DCTSIZE; ++i)
+    {
+        // now process rows from the work array; write the result to dst.
+        int16_t c0 = wsp[0];
+        int16_t d4 = wsp[1];
+        int16_t c2 = wsp[2];
+        int16_t d6 = wsp[3];
+        int16_t c1 = wsp[4];
+        int16_t d5 = wsp[5];
+        int16_t c3 = wsp[6];
+        int16_t d7 = wsp[7];
+        int16_t c4 = d4;
+        int16_t c5 = d5 + d6;
+        int16_t c7 = d5 - d6;
+        int16_t c6 = d7;
+        int16_t b4 = c4 + c5;
+        int16_t b5 = c4 - c5;
+        int16_t b6 = c6 + c7;
+        int16_t b7 = c6 - c7;
+        int16_t b0 = c0 + c1;
+        int16_t b1 = c0 - c1;
+        int16_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
+        int16_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
+        int16_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
+        int16_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
+        int16_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
+        int16_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
+        int16_t a0 = b0 + b2;
+        int16_t a3 = b0 - b2;
+        int16_t a1 = b1 + b3;
+        int16_t a2 = b1 - b3;
+        dst[0]     = a0 + a4;
+        dst[1]     = a1 + a5;
+        dst[2]     = a2 + a6;
+        dst[3]     = a3 + a7;
+        dst[4]     = a3 - a7;
+        dst[5]     = a2 - a6;
+        dst[6]     = a1 - a5;
+        dst[7]     = a0 - a4;
+        dst       += DCTSIZE;
+        wsp       += DCTSIZE;
+    }
+}
+
+/// @summary Dequantizes and performs an inverse 2D DCT on an 8x8 block of
+/// quantized DCT coefficients to retrieve sample values.
+/// @summary dst A 64-element array where the output will be written.
+/// @summary src A 64-element array of quantized DCT coefficient values.
+/// @summary quant The 64-element scaled quantization coefficient array, as
+/// output by the aan_scaled_qtable() function.
+static void idct8x8fd(
+   float       * restrict dst,
+   float const * restrict src,
+   float const * restrict quant)
+{
+    #define DCTSIZE     8U
+    #define COLUMND(i) (inp[DCTSIZE * i] * qtp[DCTSIZE * i])
+    #define i13         1.414213562f
+    #define i11         1.414213562f
+    #define i05         1.847759065f
+    #define i10         1.08239220f
+    #define i12        -2.61312593f
+
+    float        workspace[64];
+    float const *qtp = (float const*) quant;
+    float const *inp = (float const*) src;
+    float       *wsp = (float*) workspace;
+
+    for (size_t i = DCTSIZE; i > 0; --i)
+    {
+        // process columns from the input; write the result to workspace.
+        float t00 = COLUMND(0);
+        float t01 = COLUMND(2);
+        float t02 = COLUMND(4);
+        float t03 = COLUMND(6);
+        float t10 = t00 + t02;
+        float t11 = t00 - t02;
+        float t13 = t01 + t03;
+        float t12 =(t01 - t03) * i13 - t13;
+        t00 = t10 + t13;
+        t03 = t10 - t13;
+        t01 = t11 + t12;
+        t02 = t11 - t12;
+        float t04 = COLUMND(1);
+        float t05 = COLUMND(3);
+        float t06 = COLUMND(5);
+        float t07 = COLUMND(7);
+        float z13 = t06  + t05;
+        float z10 = t06  - t05;
+        float z11 = t04  + t07;
+        float z12 = t04  - t07;
+        t07 = z11 + z13;
+        t11 =(z11 - z13) * i11;
+        float z05 =(z10  + z12) * i05;
+        t10 = i10 * z12  - z05;
+        t12 = i12 * z10  + z05;
+        t06 = t12 - t07;
+        t05 = t11 - t06;
+        t04 = t10 + t05;
+        wsp[DCTSIZE * 0] = t00 + t07;
+        wsp[DCTSIZE * 1] = t01 + t06;
+        wsp[DCTSIZE * 2] = t02 + t05;
+        wsp[DCTSIZE * 3] = t03 - t04;
+        wsp[DCTSIZE * 4] = t03 + t04;
+        wsp[DCTSIZE * 5] = t02 - t05;
+        wsp[DCTSIZE * 6] = t01 - t06;
+        wsp[DCTSIZE * 7] = t00 - t07;
+        wsp++;
+        qtp++;
+        inp++;
+    }
+
+    wsp = workspace;
+    for (size_t i = 0; i < DCTSIZE; ++i)
+    {
+        // now process rows from the work array; write the result to dst.
+        float t10 = wsp[0] + wsp[4];
+        float t11 = wsp[0] - wsp[4];
+        float t13 = wsp[2] + wsp[6];
+        float t12 =(wsp[2] - wsp[6]) * i13 - t13;
+        float t00 = t10    + t13;
+        float t03 = t10    - t13;
+        float t01 = t11    + t12;
+        float t02 = t11    - t12;
+        float z13 = wsp[5] + wsp[3];
+        float z10 = wsp[5] - wsp[3];
+        float z11 = wsp[1] + wsp[7];
+        float z12 = wsp[1] - wsp[7];
+        float t07 = z11    + z13;
+        t11       =(z11    - z13) * i11;
+        float z05 =(z10    + z12) * i05;
+        t10       = i10    * z12  - z05;
+        t12       = i12    * z10  + z05;
+        float t06 = t12    - t07;
+        float t05 = t11    - t06;
+        float t04 = t10    + t05;
         dst[0] = t00 + t07;
         dst[7] = t00 - t07;
         dst[1] = t01 + t06;
@@ -744,6 +1190,45 @@ static void subsample(
 }
 
 // @todo: Need a corresponding upsample() function.
+
+/// @summary Applies quantization coefficients to an 8x8 sample block and 
+/// outputs the resulting DCT coefficients in zigzag order to maximize the 
+/// length of runs of zeroes.
+/// @param coefficients A 64-element array to store quantized DCT coefficients.
+/// @param samples A 64-element array of samples from a single channel. These
+/// values are multiplied with the quantization coefficients to produce the 
+/// DCT coefficient values.
+/// @param quantization A 64-element array of quantization coefficients derived
+/// from the user-specified compression quality factor.
+/// @param zigzag An array of indices in [0, 64] used to access the sample 
+/// table in zigzag order, as defined by the JPEG specification.
+static void quantize(
+    int16_t       * restrict coefficients, 
+    int32_t const * restrict samples, 
+    int32_t const * restrict quantization, 
+    uint8_t const * restrict zigzag)
+{
+    uint8_t const *ZZ  = zigzag;
+    int32_t const *Q   = quantization;
+    int32_t const *S   = samples;
+    int16_t       *dst = coefficients;
+
+    for (size_t i = 0; i < 64; ++i)
+    {
+        int32_t q = Q[i];
+        int32_t s = S[ZZ[i]];
+        if (s < 0)
+        {
+            s      =-s + (q >> 1);
+            *dst++ =(s <  q) ? 0 : ((int16_t)(-(s / q)));
+        }
+        else
+        {
+            s      = s + (q >> 1);
+            *dst++ =(s <  q) ? 0 : ((int16_t)( (s / q)));
+        }
+    }
+}
 
 size_t tile_count(size_t *num_x, size_t *num_y, image_tiler_config_t const *config)
 {
@@ -962,8 +1447,8 @@ void encode_block_dct(
     float   const * restrict Qchroma,
     uint8_t const * restrict RGBA)
 {
-    uint8_t YCoCg[768];
-    float   sample[64];
+    float YCoCg[768];
+    float sample[64];
 
     // perform colorspace conversion and extract the alpha channel.
     rgba_to_ycocga(YCoCg, A, RGBA);

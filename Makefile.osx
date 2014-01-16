@@ -14,7 +14,7 @@ LIB_LDFLAGS  =
 LIB_LIBS     =
 
 EXE_TARGET  := testapp
-EXE_SRCS    := main.cpp
+EXE_SRCS    := imutils.cpp main.cpp
 EXE_OBJS    := ${EXE_SRCS:.cpp=.o}
 EXE_DEPS    := ${EXE_SRCS:.cpp=.dep}
 EXE_CCFLAGS  = -fstrict-aliasing -O3 -Wall -Wextra -ggdb
