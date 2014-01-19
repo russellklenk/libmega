@@ -244,7 +244,7 @@ static void rgba_to_ycocga(
 /// @summary Convert a block of 16x16 YCoCgA pixels to RGBA format. The alpha
 /// channel is stored separately from the luma and chroma channels.
 /// @param rgba The 1024 byte buffer to which RGBA values will be written.
-/// @param ycocg The 768 byte input buffer storing the YCoCg channels. The 
+/// @param ycocg The 768 byte input buffer storing the YCoCg channels. The
 /// YCoCg data has a range of [-255, 255] for any 8-bit unsigned RGB tuple; the
 /// Y channel is always in [0, 255] while Co and Cg are in [-255, 255].
 /// @param alpha The 256 byte buffer storing the alpha channel.
@@ -265,9 +265,9 @@ static void ycocga_to_rgba(
         int16_t g = cg +  t;
         int16_t b = t  - (co >> 1);
         int16_t r = b  +  co;
-        *RGBA++   = (uint8_t) r;
-        *RGBA++   = (uint8_t) g;
-        *RGBA++   = (uint8_t) b;
+        *RGBA++   = clamp(r);
+        *RGBA++   = clamp(g);
+        *RGBA++   = clamp(b);
         *RGBA++   = *A++;
     }
 }
@@ -390,7 +390,7 @@ static void csf_from_qtable(
 /// quantization coefficients for use with the FDCT method.
 /// @param CSFTable A 64-element array specifying the Contrast Sensitivity
 /// Function coefficients generated from the quantization table such as those
-/// generated from the csf_from_qtable() function. 
+/// generated from the csf_from_qtable() function.
 static void scaled_qtable_float(
     float       * restrict Qidct,
     float       * restrict Qfdct,
@@ -556,86 +556,102 @@ static void fdct8x8i_base(int16_t * restrict dst, int16_t const * restrict src)
     for (int i = DCTSIZE - 1; i >= 0; --i)
     {
         // process rows in the input.
-        int32_t a0 = inp[0] + inp[7];
-        int32_t a4 = inp[0] - inp[7];
-        int32_t a1 = inp[1] + inp[6];
-        int32_t a5 = inp[1] - inp[6];
-        int32_t a2 = inp[2] + inp[5];
-        int32_t a6 = inp[2] - inp[5];
-        int32_t a3 = inp[3] + inp[4];
-        int32_t a7 = inp[3] - inp[4];
-        int32_t b0 = a0  +  a3;
-        int32_t b2 = a0  -  a3;
-        int32_t b1 = a1  +  a2;
-        int32_t b3 = a1  -  a2;
-        int32_t c0 = b0  +  b1;
-        int32_t c1 = b0  -  b1;
-        int32_t c2 = b2  + (b2 >> 2) + (b3 >> 1);
-        int32_t c3 =(b2 >> 1)  - b3  - (b3 >> 2);
-        int32_t b4 =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
-        int32_t b7 =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
-        int32_t b5 = a5        + a6  - (a6 >> 2) - (a6 >> 4);
-        int32_t b6 = a6        - a5  + (a5 >> 2) + (a5 >> 4);
-        int32_t c4 = b4  +  b5;
-        int32_t c5 = b4  -  b5;
-        int32_t c6 = b6  +  b7;
-        int32_t c7 = b6  -  b7;
-        int32_t d4 = c4;
-        int32_t d5 = c5  +  c7;
-        int32_t d6 = c5  -  c7;
-        int32_t d7 = c6;
-        out[0] = (int16_t)  c0;
-        out[1] = (int16_t)  d4;
-        out[2] = (int16_t)  c2;
-        out[3] = (int16_t)  d6;
-        out[4] = (int16_t)  c1;
-        out[5] = (int16_t)  d5;
-        out[6] = (int16_t)  c3;
-        out[7] = (int16_t)  d7;
-        out   +=  DCTSIZE;
-        inp   +=  DCTSIZE;
+        int32_t i0 =  inp[0];
+        int32_t i1 =  inp[1];
+        int32_t i2 =  inp[2];
+        int32_t i3 =  inp[3];
+        int32_t i4 =  inp[4];
+        int32_t i5 =  inp[5];
+        int32_t i6 =  inp[6];
+        int32_t i7 =  inp[7];
+        int32_t a0 =  i0  +  i7;
+        int32_t a1 =  i1  +  i6;
+        int32_t a2 =  i2  +  i5;
+        int32_t a3 =  i3  +  i4;
+        int32_t a4 =  i0  -  i7;
+        int32_t a5 =  i1  -  i6;
+        int32_t a6 =  i2  -  i5;
+        int32_t a7 =  i3  -  i4;
+        int32_t b0 =  a0  +  a3;
+        int32_t b1 =  a1  +  a2;
+        int32_t b2 =  a0  -  a3;
+        int32_t b3 =  a1  -  a2;
+        int32_t c0 =  b0  +  b1;
+        int32_t c1 =  b0  -  b1;
+        int32_t c2 =  b2  + (b2 >> 2) + (b3 >> 1);
+        int32_t c3 = (b2 >> 1)  - b3  - (b3 >> 2);
+        int32_t b4 = (a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
+        int32_t b7 = (a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
+        int32_t b5 =  a5        + a6  - (a6 >> 2) - (a6 >> 4);
+        int32_t b6 =  a6        - a5  + (a5 >> 2) + (a5 >> 4);
+        int32_t c4 =  b4  +  b5;
+        int32_t c5 =  b4  -  b5;
+        int32_t c6 =  b6  +  b7;
+        int32_t c7 =  b6  -  b7;
+        int32_t d4 =  c4;
+        int32_t d5 =  c5  +  c7;
+        int32_t d6 =  c5  -  c7;
+        int32_t d7 =  c6;
+        out[0]  = (int16_t) c0;
+        out[1]  = (int16_t) d4;
+        out[2]  = (int16_t) c2;
+        out[3]  = (int16_t) d6;
+        out[4]  = (int16_t) c1;
+        out[5]  = (int16_t) d5;
+        out[6]  = (int16_t) c3;
+        out[7]  = (int16_t) d7;
+        out    +=  DCTSIZE;
+        inp    +=  DCTSIZE;
     }
 
     out = dst;
     for (int i = DCTSIZE - 1; i >= 0; --i)
     {
         // process columns in the input.
-        int32_t a0 = out[DCTSIZE * 0] + out[DCTSIZE * 7];
-        int32_t a4 = out[DCTSIZE * 0] - out[DCTSIZE * 7];
-        int32_t a1 = out[DCTSIZE * 1] + out[DCTSIZE * 6];
-        int32_t a5 = out[DCTSIZE * 1] - out[DCTSIZE * 6];
-        int32_t a2 = out[DCTSIZE * 2] + out[DCTSIZE * 5];
-        int32_t a6 = out[DCTSIZE * 2] - out[DCTSIZE * 5];
-        int32_t a3 = out[DCTSIZE * 3] + out[DCTSIZE * 4];
-        int32_t a7 = out[DCTSIZE * 3] - out[DCTSIZE * 4];
-        int32_t b0 = a0  +  a3;
-        int32_t b2 = a0  -  a3;
-        int32_t b1 = a1  +  a2;
-        int32_t b3 = a1  -  a2;
-        int32_t c0 = b0  +  b1;
-        int32_t c1 = b0  -  b1;
-        int32_t c2 = b2  + (b2 >> 2) + (b3 >> 1);
-        int32_t c3 =(b2 >> 1)  - b3  - (b3 >> 2);
-        int32_t b4 =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
-        int32_t b7 =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
-        int32_t b5 = a5        + a6  - (a6 >> 2) - (a6 >> 4);
-        int32_t b6 = a6        - a5  + (a5 >> 2) + (a5 >> 4);
-        int32_t c4 = b4  +  b5;
-        int32_t c5 = b4  -  b5;
-        int32_t c6 = b6  +  b7;
-        int32_t c7 = b6  -  b7;
-        int32_t d4 = c4;
-        int32_t d5 = c5  +  c7;
-        int32_t d6 = c5  -  c7;
-        int32_t d7 = c6;
-        out[DCTSIZE * 0] = (int16_t) c0;
-        out[DCTSIZE * 1] = (int16_t) d4;
-        out[DCTSIZE * 2] = (int16_t) c2;
-        out[DCTSIZE * 3] = (int16_t) d6;
-        out[DCTSIZE * 4] = (int16_t) c1;
-        out[DCTSIZE * 5] = (int16_t) d5;
-        out[DCTSIZE * 6] = (int16_t) c3;
-        out[DCTSIZE * 7] = (int16_t) d7;
+        int32_t i0  = out[DCTSIZE * 0];
+        int32_t i1  = out[DCTSIZE * 1];
+        int32_t i2  = out[DCTSIZE * 2];
+        int32_t i3  = out[DCTSIZE * 3];
+        int32_t i4  = out[DCTSIZE * 4];
+        int32_t i5  = out[DCTSIZE * 5];
+        int32_t i6  = out[DCTSIZE * 6];
+        int32_t i7  = out[DCTSIZE * 7];
+        int32_t a0  = i0  +  i7;
+        int32_t a1  = i1  +  i6;
+        int32_t a2  = i2  +  i5;
+        int32_t a3  = i3  +  i4;
+        int32_t a4  = i0  -  i7;
+        int32_t a5  = i1  -  i6;
+        int32_t a6  = i2  -  i5;
+        int32_t a7  = i3  -  i4;
+        int32_t b0  = a0  +  a3;
+        int32_t b1  = a1  +  a2;
+        int32_t b2  = a0  -  a3;
+        int32_t b3  = a1  -  a2;
+        int32_t c0  = b0  +  b1;
+        int32_t c1  = b0  -  b1;
+        int32_t c2  = b2  + (b2 >> 2) + (b3 >> 1);
+        int32_t c3  =(b2 >> 1)  - b3  - (b3 >> 2);
+        int32_t b4  =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
+        int32_t b7  =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
+        int32_t b5  = a5        + a6  - (a6 >> 2) - (a6 >> 4);
+        int32_t b6  = a6        - a5  + (a5 >> 2) + (a5 >> 4);
+        int32_t c4  = b4  +  b5;
+        int32_t c5  = b4  -  b5;
+        int32_t c6  = b6  +  b7;
+        int32_t c7  = b6  -  b7;
+        int32_t d4  = c4;
+        int32_t d5  = c5  +  c7;
+        int32_t d6  = c5  -  c7;
+        int32_t d7  = c6;
+        out[DCTSIZE * 0]  = (int16_t) c0;
+        out[DCTSIZE * 1]  = (int16_t) d4;
+        out[DCTSIZE * 2]  = (int16_t) c2;
+        out[DCTSIZE * 3]  = (int16_t) d6;
+        out[DCTSIZE * 4]  = (int16_t) c1;
+        out[DCTSIZE * 5]  = (int16_t) d5;
+        out[DCTSIZE * 6]  = (int16_t) c3;
+        out[DCTSIZE * 7]  = (int16_t) d7;
         out++;
     }
 }
@@ -875,7 +891,7 @@ static void fdct8x8iq_base(
 static void idct8x8f_base(float * restrict dst, float const * restrict src)
 {
     #define DCTSIZE     8U
-    #define COLUMNF(i) (inp[DCTSIZE*i])
+    #define COLUMNF(x) (inp[DCTSIZE*x])
     #define i13         1.414213562f
     #define i11         1.414213562f
     #define i05         1.847759065f
@@ -979,43 +995,46 @@ static void idct8x8f_base(float * restrict dst, float const * restrict src)
 static void idct8x8i_base(int16_t * restrict dst, int16_t const * restrict src)
 {
     #define DCTSIZE       8U
-    #define COLUMNI(i)   (inp[DCTSIZE*i])
+    #define COLUMNI(x)   (inp[DCTSIZE*x])
 
-    int16_t        workspace[64];
+    int32_t        workspace[64];
     int16_t const *inp = (int16_t const*) src;
-    int16_t       *wsp = (int16_t*) workspace;
+    int32_t       *wsp = (int32_t*) workspace;
+
+    // @note: intermediate values are stored in 32-bit integers in C
+    // since overflow of signed integer values is technically undefined.
 
     for (size_t i = DCTSIZE; i > 0; --i)
     {
         // process columns from the input; write the result to workspace.
-        int16_t c0 = COLUMNI(0);
-        int16_t d4 = COLUMNI(1);
-        int16_t c2 = COLUMNI(2);
-        int16_t d6 = COLUMNI(3);
-        int16_t c1 = COLUMNI(4);
-        int16_t d5 = COLUMNI(5);
-        int16_t c3 = COLUMNI(6);
-        int16_t d7 = COLUMNI(7);
-        int16_t c4 = d4;
-        int16_t c5 = d5 + d6;
-        int16_t c7 = d5 - d6;
-        int16_t c6 = d7;
-        int16_t b4 = c4 + c5;
-        int16_t b5 = c4 - c5;
-        int16_t b6 = c6 + c7;
-        int16_t b7 = c6 - c7;
-        int16_t b0 = c0 + c1;
-        int16_t b1 = c0 - c1;
-        int16_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
-        int16_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
-        int16_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
-        int16_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
-        int16_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
-        int16_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
-        int16_t a0 = b0 + b2;
-        int16_t a3 = b0 - b2;
-        int16_t a1 = b1 + b3;
-        int16_t a2 = b1 - b3;
+        int32_t c0 = COLUMNI(0);
+        int32_t d4 = COLUMNI(1);
+        int32_t c2 = COLUMNI(2);
+        int32_t d6 = COLUMNI(3);
+        int32_t c1 = COLUMNI(4);
+        int32_t d5 = COLUMNI(5);
+        int32_t c3 = COLUMNI(6);
+        int32_t d7 = COLUMNI(7);
+        int32_t c4 = d4;
+        int32_t c5 = d5 + d6;
+        int32_t c7 = d5 - d6;
+        int32_t c6 = d7;
+        int32_t b4 = c4 + c5;
+        int32_t b5 = c4 - c5;
+        int32_t b6 = c6 + c7;
+        int32_t b7 = c6 - c7;
+        int32_t b0 = c0 + c1;
+        int32_t b1 = c0 - c1;
+        int32_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
+        int32_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
+        int32_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
+        int32_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
+        int32_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
+        int32_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
+        int32_t a0 = b0 + b2;
+        int32_t a3 = b0 - b2;
+        int32_t a1 = b1 + b3;
+        int32_t a2 = b1 - b3;
         wsp[DCTSIZE*0]  = a0 + a4;
         wsp[DCTSIZE*1]  = a1 + a5;
         wsp[DCTSIZE*2]  = a2 + a6;
@@ -1032,42 +1051,42 @@ static void idct8x8i_base(int16_t * restrict dst, int16_t const * restrict src)
     for (size_t i = 0; i < DCTSIZE; ++i)
     {
         // now process rows from the work array; write the result to dst.
-        int16_t c0 = wsp[0];
-        int16_t d4 = wsp[1];
-        int16_t c2 = wsp[2];
-        int16_t d6 = wsp[3];
-        int16_t c1 = wsp[4];
-        int16_t d5 = wsp[5];
-        int16_t c3 = wsp[6];
-        int16_t d7 = wsp[7];
-        int16_t c4 = d4;
-        int16_t c5 = d5 + d6;
-        int16_t c7 = d5 - d6;
-        int16_t c6 = d7;
-        int16_t b4 = c4 + c5;
-        int16_t b5 = c4 - c5;
-        int16_t b6 = c6 + c7;
-        int16_t b7 = c6 - c7;
-        int16_t b0 = c0 + c1;
-        int16_t b1 = c0 - c1;
-        int16_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
-        int16_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
-        int16_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
-        int16_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
-        int16_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
-        int16_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
-        int16_t a0 = b0 + b2;
-        int16_t a3 = b0 - b2;
-        int16_t a1 = b1 + b3;
-        int16_t a2 = b1 - b3;
-        dst[0]     = a0 + a4;
-        dst[1]     = a1 + a5;
-        dst[2]     = a2 + a6;
-        dst[3]     = a3 + a7;
-        dst[4]     = a3 - a7;
-        dst[5]     = a2 - a6;
-        dst[6]     = a1 - a5;
-        dst[7]     = a0 - a4;
+        int32_t c0 = wsp[0];
+        int32_t d4 = wsp[1];
+        int32_t c2 = wsp[2];
+        int32_t d6 = wsp[3];
+        int32_t c1 = wsp[4];
+        int32_t d5 = wsp[5];
+        int32_t c3 = wsp[6];
+        int32_t d7 = wsp[7];
+        int32_t c4 = d4;
+        int32_t c5 = d5 + d6;
+        int32_t c7 = d5 - d6;
+        int32_t c6 = d7;
+        int32_t b4 = c4 + c5;
+        int32_t b5 = c4 - c5;
+        int32_t b6 = c6 + c7;
+        int32_t b7 = c6 - c7;
+        int32_t b0 = c0 + c1;
+        int32_t b1 = c0 - c1;
+        int32_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
+        int32_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
+        int32_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
+        int32_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
+        int32_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
+        int32_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
+        int32_t a0 = b0 + b2;
+        int32_t a3 = b0 - b2;
+        int32_t a1 = b1 + b3;
+        int32_t a2 = b1 - b3;
+        dst[0]     =(int16_t)  (a0 + a4);
+        dst[1]     =(int16_t)  (a1 + a5);
+        dst[2]     =(int16_t)  (a2 + a6);
+        dst[3]     =(int16_t)  (a3 + a7);
+        dst[4]     =(int16_t)  (a3 - a7);
+        dst[5]     =(int16_t)  (a2 - a6);
+        dst[6]     =(int16_t)  (a1 - a5);
+        dst[7]     =(int16_t)  (a0 - a4);
         dst       += DCTSIZE;
         wsp       += DCTSIZE;
     }
@@ -1085,7 +1104,7 @@ static void idct8x8fd_base(
    float const * restrict quant)
 {
     #define DCTSIZE      8U
-    #define COLUMNFD(i) (inp[DCTSIZE * i] * qtp[DCTSIZE * i])
+    #define COLUMNFD(x) (inp[DCTSIZE*x] * qtp[DCTSIZE*x])
     #define i13          1.414213562f
     #define i11          1.414213562f
     #define i05          1.847759065f
@@ -1280,14 +1299,14 @@ static void idct8x8id_base(
         int32_t a3 = b0 - b2;
         int32_t a1 = b1 + b3;
         int32_t a2 = b1 - b3;
-        dst[0]     =(int16_t) (a0 + a4);
-        dst[1]     =(int16_t) (a1 + a5);
-        dst[2]     =(int16_t) (a2 + a6);
-        dst[3]     =(int16_t) (a3 + a7);
-        dst[4]     =(int16_t) (a3 - a7);
-        dst[5]     =(int16_t) (a2 - a6);
-        dst[6]     =(int16_t) (a1 - a5);
-        dst[7]     =(int16_t) (a0 - a4);
+        dst[0]     =(int16_t) ((a0 + a4) >> 6);   // descale by 64
+        dst[1]     =(int16_t) ((a1 + a5) >> 6);   // descale by 64
+        dst[2]     =(int16_t) ((a2 + a6) >> 6);   // descale by 64
+        dst[3]     =(int16_t) ((a3 + a7) >> 6);   // descale by 64
+        dst[4]     =(int16_t) ((a3 - a7) >> 6);   // descale by 64
+        dst[5]     =(int16_t) ((a2 - a6) >> 6);   // descale by 64
+        dst[6]     =(int16_t) ((a1 - a5) >> 6);   // descale by 64
+        dst[7]     =(int16_t) ((a0 - a4) >> 6);   // descale by 64
         dst       += DCTSIZE;
         wsp       += DCTSIZE;
     }
@@ -1300,21 +1319,20 @@ static void idct8x8id_base(
 /// @param x The quadrant of the sub-block to sample, 0 = left, 1 = right.
 /// @param y The quadrant of the sub-block to sample, 0 = top, 1 = bottom.
 /// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
-static void subblock_float(
-    float         * restrict samples,
-    int16_t const * restrict ycocg,
+template <typename T>
+static void subblock(
+    T             * restrict samples,
+    int16_t const * restrict YCoCg,
     size_t                   x,
     size_t                   y,
-    size_t                   c)
+    size_t                   channel)
 {
-    int16_t const *YCoCg = (int16_t const*) ycocg;
-    int16_t const *src   = NULL;
-    float         *dst   = samples;
-
+    int16_t const *src = NULL;
+    T             *dst = samples;
     // each column has three elements, so a row has 16 * 3 = 48 elements.
     // convert x to a column index by multiplying by 8 * 3 = 24 for x[0, 1].
     // convert y to a row index by multiplying by 8 for y[0, 1].
-    x = (x * 24)  + c;
+    x = (x * 24)  + channel;
     y = (y *  8);
     for (size_t i = 0; i < 8; ++i)
     {
@@ -1327,75 +1345,6 @@ static void subblock_float(
         *dst++ =   src[(5 * 3)];
         *dst++ =   src[(6 * 3)];
         *dst++ =   src[(7 * 3)];
-    }
-}
-
-/// @summary Loads an 8x8 sub-block from a 16x16 block of pixels. This routine
-/// is used to grab sub-blocks of the luma channel.
-/// @param samples A 64-element array used to store the sampled data.
-/// @param ycocg The 768 element array of YCoCg pixel data being sampled.
-/// @param x The quadrant of the sub-block to sample, 0 = left, 1 = right.
-/// @param y The quadrant of the sub-block to sample, 0 = top, 1 = bottom.
-/// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
-static void subblock_int16(
-    int16_t       * restrict samples,
-    int16_t const * restrict ycocg,
-    size_t                   x,
-    size_t                   y,
-    size_t                   c)
-{
-    int16_t const *YCoCg = (int16_t const*) ycocg;
-    int16_t const *src   = NULL;
-    int16_t       *dst   = samples;
-
-    // each column has three elements, so a row has 16 * 3 = 48 elements.
-    // convert x to a column index by multiplying by 8 * 3 = 24 for x[0, 1].
-    // convert y to a row index by multiplying by 8 for y[0, 1].
-    x = (x * 24)  + c;
-    y = (y *  8);
-    for (size_t i = 0; i < 8; ++i)
-    {
-         src   =&YCoCg[(y + i)  *  48] + x;
-        *dst++ =   src[(0 * 3)];
-        *dst++ =   src[(1 * 3)];
-        *dst++ =   src[(2 * 3)];
-        *dst++ =   src[(3 * 3)];
-        *dst++ =   src[(4 * 3)];
-        *dst++ =   src[(5 * 3)];
-        *dst++ =   src[(6 * 3)];
-        *dst++ =   src[(7 * 3)];
-    }
-}
-
-/// @summary Loads an 8x8 sub-block from a 16x16 block of pixels, performing
-/// downsampling by half in each of the horizontal and vertical dimensions,
-/// such that the resulting 8x8 sub-block contains a downsampled version of the
-/// entire 16x16 source block, instead of just an 8x8 sub-region. This routine
-/// is used to subsample the chroma channels, Co and Cg to 4:2:0.
-/// @param samples A 64-element array used to store the sampled data.
-/// @param ycocg The 768 element array of YCoCg pixel data being sampled.
-/// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
-static void subsample_float(
-    float         * restrict samples,
-    int16_t const * restrict ycocg,
-    size_t                   c)
-{
-    int16_t const *YCoCg = (int16_t const*) ycocg;
-    int16_t const *src1  = NULL;
-    int16_t const *src2  = NULL;
-    float         *dst   = samples;
-    for (size_t i = 0; i < 16; i += 2)
-    {
-         src1  =&YCoCg[(i + 0) * 48] + c;
-         src2  =&YCoCg[(i + 1) * 48] + c;
-        *dst++ = ((src1[0 * 3] + src1[1 * 3] + src2[0 * 3] + src2[1 * 3]) >> 2);
-        *dst++ = ((src1[2 * 3] + src1[3 * 3] + src2[2 * 3] + src2[3 * 3]) >> 2);
-        *dst++ = ((src1[4 * 3] + src1[5 * 3] + src2[4 * 3] + src2[5 * 3]) >> 2);
-        *dst++ = ((src1[6 * 3] + src1[7 * 3] + src2[6 * 3] + src2[7 * 3]) >> 2);
-        *dst++ = ((src1[8 * 3] + src1[9 * 3] + src2[8 * 3] + src2[9 * 3]) >> 2);
-        *dst++ = ((src1[10* 3] + src1[11* 3] + src2[10* 3] + src2[11* 3]) >> 2);
-        *dst++ = ((src1[12* 3] + src1[13* 3] + src2[12* 3] + src2[13* 3]) >> 2);
-        *dst++ = ((src1[14* 3] + src1[15* 3] + src2[14* 3] + src2[15* 3]) >> 2);
     }
 }
 
@@ -1406,20 +1355,20 @@ static void subsample_float(
 /// is used to subsample the chroma channels, Co and Cg.
 /// @param samples A 64-element array used to store the sampled data.
 /// @param ycocg The 768 element array of YCoCg pixel data being sampled.
-/// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
-static void subsample_int16(
-    int16_t       * restrict samples,
-    int16_t const * restrict ycocg,
-    size_t                   c)
+/// @param channel The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
+template <typename T>
+static void subsample(
+    T             * restrict samples,
+    int16_t const * restrict YCoCg,
+    size_t                   channel)
 {
-    int16_t const *YCoCg = (int16_t const*) ycocg;
     int16_t const *src1  = NULL;
     int16_t const *src2  = NULL;
-    int16_t       *dst   = samples;
+    T             *dst   = samples;
     for (size_t i = 0; i < 16; i += 2)
     {
-         src1  =&YCoCg[(i + 0) * 48] + c;
-         src2  =&YCoCg[(i + 1) * 48] + c;
+         src1  =&YCoCg[(i + 0) * 48] + channel;
+         src2  =&YCoCg[(i + 1) * 48] + channel;
         *dst++ = ((src1[0 * 3] + src1[1 * 3] + src2[0 * 3] + src2[1 * 3]) >> 2);
         *dst++ = ((src1[2 * 3] + src1[3 * 3] + src2[2 * 3] + src2[3 * 3]) >> 2);
         *dst++ = ((src1[4 * 3] + src1[5 * 3] + src2[4 * 3] + src2[5 * 3]) >> 2);
@@ -1436,18 +1385,17 @@ static void subsample_int16(
 /// luma channel from a 16x16 block into four 8x8 blocks.
 /// @param dst A 256 element array to store the output 16x16 block.
 /// @param src A 256 element array storing the packed 8x8 input blocks.
-static void merge_blocks_int16(int16_t * restrict dst, int16_t const * restrict src)
+template <typename T>
+static void merge_blocks(T * restrict dst, T const * restrict src)
 {
-    // combine four 8x8 blocks stored in a contiguous array back into a
-    // single 16x16 block. the 8x8 blocks are stored in natural order.
-    int16_t const * restrict src0 = &src[0];     // src[0...63]
-    int16_t const * restrict src1 = &src[64];    // src[64...127]
-    int16_t const * restrict src2 = &src[128];   // src[128...191]
-    int16_t const * restrict src3 = &src[192];   // src[192...255]
-    int16_t       * restrict dst0 = &dst[0];     // col[0...7],  row[0...7]
-    int16_t       * restrict dst1 = &dst[8];     // col[8...15], row[0...7]
-    int16_t       * restrict dst2 = &dst[128];   // col[0...7],  row[8...15]
-    int16_t       * restrict dst3 = &dst[128+8]; // col[8...15], row[8...15]
+    T const * restrict src0 = &src[0];     // src[0...63]
+    T const * restrict src1 = &src[64];    // src[64...127]
+    T const * restrict src2 = &src[128];   // src[128...191]
+    T const * restrict src3 = &src[192];   // src[192...255]
+    T       * restrict dst0 = &dst[0];     // col[0...7],  row[0...7]
+    T       * restrict dst1 = &dst[8];     // col[8...15], row[0...7]
+    T       * restrict dst2 = &dst[128];   // col[0...7],  row[8...15]
+    T       * restrict dst3 = &dst[128+8]; // col[8...15], row[8...15]
     for (size_t i = 0; i < 8; ++i)
     {
         // copy each row from source to destination.
@@ -1471,12 +1419,12 @@ static void merge_blocks_int16(int16_t * restrict dst, int16_t const * restrict 
 /// for easy merging with the luma channel values.
 /// @param dst A 256-element array to store the output 16x16 block.
 /// @param src A 64-element array specifying the 8x8 input block.
-static void scale_block_int16(int16_t * restrict dst, int16_t const * restrict src)
+template <typename T>
+static void scale_block(T * restrict dst, T const * restrict src)
 {
-    // scale an 8x8 block into a 16x16 block using pixel doubling.
-    int16_t const * restrict srcRow  = src;
-    int16_t       * restrict dstRow0 =&dst[0];
-    int16_t       * restrict dstRow1 =&dst[16];
+    T const * restrict srcRow  = src;
+    T       * restrict dstRow0 =&dst[0];
+    T       * restrict dstRow1 =&dst[16];
     for (size_t i = 0; i < 8; ++i)
     {
         // copy each row from source to destination.
@@ -1492,12 +1440,6 @@ static void scale_block_int16(int16_t * restrict dst, int16_t const * restrict s
         dstRow0    += 32;
         dstRow1    += 32;
     }
-}
-
-static void descale8x8i(int16_t *buffer)
-{
-    for (size_t i   = 0; i < 64; ++i)
-        buffer[i] >>= 6;
 }
 
 size_t tile_count(size_t *num_x, size_t *num_y, image_tiler_config_t const *config)
@@ -1768,43 +1710,6 @@ void idct8x8id(
     idct8x8id_base(dst, src, Qidct);
 }
 
-void encode16x16f(
-    float         * restrict Y,
-    float         * restrict Co,
-    float         * restrict Cg,
-    uint8_t       * restrict A,
-    float   const * restrict Qluma,
-    float   const * restrict Qchroma,
-    uint8_t const * restrict RGBA)
-{
-    int16_t YCoCg[768];
-    float   sample[64];
-
-    // perform colorspace conversion and extract the alpha channel.
-    rgba_to_ycocga(YCoCg, A, RGBA);
-
-    // extract and quantize the luma channel into four 8x8 blocks.
-    subblock_float(sample,  YCoCg,  0, 0, 0);
-    fdct8x8fq_base(&Y[0],   sample, Qluma);
-
-    subblock_float(sample,  YCoCg,  1, 0, 0);
-    fdct8x8fq_base(&Y[64],  sample, Qluma);
-
-    subblock_float(sample,  YCoCg,  0, 1, 0);
-    fdct8x8fq_base(&Y[128], sample, Qluma);
-
-    subblock_float(sample,  YCoCg,  1, 1, 0);
-    fdct8x8fq_base(&Y[192], sample, Qluma);
-
-    // downsample and quantize the chroma-orange channel into one 8x8 block.
-    subsample_float(sample, YCoCg,  1);
-    fdct8x8fq_base (Co,     sample, Qchroma);
-
-    // downsample and quantize the chroma-gree channel into one 8x8 block.
-    subsample_float(sample, YCoCg,  2);
-    fdct8x8fq_base (Cg,     sample, Qchroma);
-}
-
 void encode16x16i(
     int16_t       * restrict Y,
     int16_t       * restrict Co,
@@ -1815,31 +1720,31 @@ void encode16x16i(
     uint8_t const * restrict RGBA)
 {
     int16_t YCoCg[768];
-    int16_t sample[64];
+    int16_t samp00[64];
+    int16_t samp10[64];
+    int16_t samp01[64];
+    int16_t samp11[64];
+    int16_t sampCo[64];
+    int16_t sampCg[64];
 
     // perform colorspace conversion and extract the alpha channel.
     rgba_to_ycocga(YCoCg, A, RGBA);
 
     // extract and quantize the luma channel into four 8x8 blocks.
-    subblock_int16(sample,  YCoCg,  0, 0, 0);
-    fdct8x8iq_base(&Y[0],   sample, Qluma);
+    subblock(samp00, YCoCg, 0, 0, 0);
+    subblock(samp10, YCoCg, 1, 0, 0);
+    subblock(samp01, YCoCg, 0, 1, 0);
+    subblock(samp11, YCoCg, 1, 1, 0);
+    fdct8x8iq_base(&Y[0],   samp00, Qluma);
+    fdct8x8iq_base(&Y[64],  samp10, Qluma);
+    fdct8x8iq_base(&Y[128], samp01, Qluma);
+    fdct8x8iq_base(&Y[192], samp11, Qluma);
 
-    subblock_int16(sample,  YCoCg,  1, 0, 0);
-    fdct8x8iq_base(&Y[64],  sample, Qluma);
-
-    subblock_int16(sample,  YCoCg,  0, 1, 0);
-    fdct8x8iq_base(&Y[128], sample, Qluma);
-
-    subblock_int16(sample,  YCoCg,  1, 1, 0);
-    fdct8x8iq_base(&Y[192], sample, Qluma);
-
-    // downsample and quantize the chroma-orange channel into one 8x8 block.
-    subsample_int16(sample, YCoCg,  1);
-    fdct8x8iq_base (Co,     sample, Qchroma);
-
-    // downsample and quantize the chroma-gree channel into one 8x8 block.
-    subsample_int16(sample, YCoCg,  2);
-    fdct8x8iq_base (Cg,     sample, Qchroma);
+    // downsample and quantize the chroma channels into one 8x8 block each.
+    subsample(sampCo, YCoCg, 1);
+    subsample(sampCg, YCoCg, 2);
+    fdct8x8iq_base(Co, sampCo, Qchroma);
+    fdct8x8iq_base(Cg, sampCg, Qchroma);
 }
 
 void decode16x16i_rgb(
@@ -1863,21 +1768,19 @@ void decode16x16i_rgb(
     idct8x8id_base(&Yd[64],  &Y[64],  Qluma);
     idct8x8id_base(&Yd[128], &Y[128], Qluma);
     idct8x8id_base(&Yd[192], &Y[192], Qluma);
-    merge_blocks_int16(Ym, Yd);
+    merge_blocks(Ym, Yd);
 
     // dequantize the 8x8 chroma-orange block, and then
     // scale it back up to 16x16 to match the luma channel.
     // do the same for the the chroma-green channel.
     idct8x8id_base(Od, Co, Qchroma);
     idct8x8id_base(Gd, Cg, Qchroma);
-    scale_block_int16(Os, Od);
-    scale_block_int16(Gs, Gd);
+    scale_block(Os, Od);
+    scale_block(Gs, Gd);
 
-    // now convert from YCoCg back to RGB.
-    // adding 128 maps the YCoCg samples from [-128, 127], centered at
-    // zero (which was required for the DCT/IDCT) back to [0, 255].
-    // the conversion for Co and Cg to RGB subtracts 128 from those values
-    // again, so we only add 128 to the luma channel.
+    // now convert from YCoCg back to RGB. the IDCT may have
+    // resulted in values outside of the valid range, so clamping
+    // to the range [0, 255] is necessary.
     for (size_t i = 0; i < 256; ++i)
     {
         int32_t y = Ym[i];
@@ -1887,9 +1790,9 @@ void decode16x16i_rgb(
         int16_t g = cg +  t;
         int16_t b = t  - (co >> 1);
         int16_t r = b  +  co;
-        *RGB++    = (uint8_t) r; // might need to clamp() because of IDCT...
-        *RGB++    = (uint8_t) g; // might need to clamp() because of IDCT...
-        *RGB++    = (uint8_t) b; // might need to clamp() because of IDCT...
+        *RGB++    = clamp(r);
+        *RGB++    = clamp(g);
+        *RGB++    = clamp(b);
     }
 }
 
@@ -1912,30 +1815,22 @@ void decode16x16i_rgba(
     // dequantize and IDCT the four luma blocks into Yd.
     // merge them back into a single 16x16 block in Ym.
     idct8x8id_base(&Yd[0],   &Y[0],   Qluma);
-    descale8x8i   (&Yd[0]);
     idct8x8id_base(&Yd[64],  &Y[64],  Qluma);
-    descale8x8i   (&Yd[64]);
     idct8x8id_base(&Yd[128], &Y[128], Qluma);
-    descale8x8i   (&Yd[128]);
     idct8x8id_base(&Yd[192], &Y[192], Qluma);
-    descale8x8i   (&Yd[192]);
-    merge_blocks_int16(Ym, Yd);
+    merge_blocks(Ym, Yd);
 
     // dequantize the 8x8 chroma-orange block, and then
     // scale it back up to 16x16 to match the luma channel.
     // do the same for the the chroma-green channel.
     idct8x8id_base(Od, Co, Qchroma);
-    descale8x8i   (Od);
     idct8x8id_base(Gd, Cg, Qchroma);
-    descale8x8i   (Gd);
-    scale_block_int16(Os,Od);
-    scale_block_int16(Gs,Gd);
+    scale_block(Os, Od);
+    scale_block(Gs, Gd);
 
-    // now convert from YCoCg back to RGB.
-    // adding 128 maps the YCoCg samples from [-128, 127], centered at
-    // zero (which was required for the DCT/IDCT) back to [0, 255].
-    // the conversion for Co and Cg to RGB subtracts 128 from those values
-    // again, so we only add 128 to the luma channel.
+    // now convert from YCoCg back to RGB. the IDCT may have
+    // resulted in values outside of the valid range, so clamping
+    // to the range [0, 255] is necessary.
     for (size_t i = 0; i < 256; ++i)
     {
         int32_t y = Ym[i];
@@ -1945,9 +1840,9 @@ void decode16x16i_rgba(
         int16_t g = cg +  t;
         int16_t b = t  - (co >> 1);
         int16_t r = b  +  co;
-        *RGBA++   = (uint8_t) r; // might need to clamp() because of IDCT...
-        *RGBA++   = (uint8_t) g; // might need to clamp() because of IDCT...
-        *RGBA++   = (uint8_t) b; // might need to clamp() because of IDCT...
+        *RGBA++   = clamp(r);
+        *RGBA++   = clamp(g);
+        *RGBA++   = clamp(b);
         *RGBA++   =*A++;
     }
 }
