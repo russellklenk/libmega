@@ -10,6 +10,11 @@
 /// and also Fabian 'ryg' Giesen's blog postings about Bink 2 IDCT at:
 ///   http://fgiesen.wordpress.com/2013/11/04/bink-2-2-integer-dct-design-part-1
 ///   http://fgiesen.wordpress.com/2013/11/10/bink-2-2-integer-dct-design-part-2
+/// and also this source file, when referencing cbloom code:
+///   http://www.ict.kth.se/courses/IL2226/Spring2013/Lab/Lab%20II/Lab_II.c
+/// and also this paper on YCoCg color space conversions for compression:
+///   Lifting-Based Reversable Color Transformations for Image Compression
+///   http://research.microsoft.com/pubs/102040/2008_colortransforms_malvarsullivansrinivasan.pdf
 /// @author Russell Klenk (contact@russellklenk.com)
 ///////////////////////////////////////////////////////////////////////////80*/
 
@@ -24,15 +29,6 @@
 /*////////////////
 //  Data Types  //
 ////////////////*/
-/// see jdct.h, jddctmgr.c, jmorecfg.h, jpegint.h
-#define DCTINT_ONE           ((int32_t) 1)
-#define DCTINT_SCALE_BITS    2U
-#define DCTINT_CONST_BITS    14U
-#define DCTINT_CONST_SCALE   (DCTINT_ONE     << DCTINT_CONST_BITS)
-#define DCTINT_FIX(x)        (((int32_t) ((x) * DCTINT_CONST_SCALE + 0.5))
-#define DCTINT_DESCALE(x,n)  (((x) + (DCTINT_ONE << ((n)-1))) >> (n)
-#define DCTINT_MULTIPLY(a,b) (((int16_t) (a)) * ((int16_t) (b)))
-
 /// @summary A lookup table of array indices used to access DCT coefficients
 /// in zig-zag order, post-FDCT. Accessing the coefficients in zig-zag order
 /// increases the length of runs of zeroes.
@@ -93,7 +89,7 @@ static const int16_t JPEGChromaQuant[64] =
 /// @summary AA&N scale factor values. The scale factors are computed as:
 /// AANScaleFactor[0] = 1.0
 /// AANScaleFactor[k] = cos(k*PI/16) * sqrt(2) for k in [1, 7]
-static const float AANScaleFactor_float[8] = 
+static const float AANScaleFactor_float[8] =
 {
     1.0f, 1.387039845f, 1.306562965f, 1.175875602f,
     1.0f, 0.785694958f, 0.541196100f, 0.275899379f
@@ -102,7 +98,7 @@ static const float AANScaleFactor_float[8] =
 /// @summary AA&N scale factors for inverse DCT. These are the values that
 /// are output if you specify a Qtable = NULL (or all 1.0f) to the function
 /// scaled_qtable_float(), and result in a unitary transform.
-static const float AAN_IDCT_Factors_float[64] = 
+static const float AAN_IDCT_Factors_float[64] =
 {
     0.12500f, 0.17338f, 0.16332f, 0.14698f, 0.12500f, 0.09821f, 0.06765f, 0.03449f,
     0.17338f, 0.24048f, 0.22653f, 0.20387f, 0.17338f, 0.13622f, 0.09383f, 0.04784f,
@@ -117,7 +113,7 @@ static const float AAN_IDCT_Factors_float[64] =
 /// @summary AA&N scale factors for forward DCT. These are the values that
 /// are output if you specify a Qtable = NULL (or all 1.0f) to the function
 /// scaled_qtable_float(), and result in a unitary transform.
-static const float AAN_FDCT_Factors_float[64] = 
+static const float AAN_FDCT_Factors_float[64] =
 {
     0.12500f, 0.09012f, 0.09567f, 0.10630f, 0.12500f, 0.15909f, 0.23097f, 0.45306f,
     0.09012f, 0.06497f, 0.06897f, 0.07664f, 0.09012f, 0.11470f, 0.16652f, 0.32664f,
@@ -134,7 +130,7 @@ static const float AAN_FDCT_Factors_float[64] =
 /// calculated from the quantization table Q using  CSF[i] = Q[0] / Q[i] and
 /// represent the ratio of the AC coefficient to the DC coefficient. The values
 /// in this table are also stored in zig-zag order.
-static const float CSFLuma_float[64] = 
+static const float CSFLuma_float[64] =
 {
     1.000000f, 1.454545f, 1.600000f, 1.000000f, 0.666667f, 0.400000f, 0.313726f, 0.262295f,
     1.333333f, 1.333333f, 1.142857f, 0.842105f, 0.615385f, 0.275862f, 0.266667f, 0.290909f,
@@ -151,7 +147,7 @@ static const float CSFLuma_float[64] =
 /// are calculated from the quantization table Q using  CSF[i] = Q[0] / Q[i]
 /// and represent the ratio of the AC coefficient to the DC coefficient. The
 /// values in this table are also stored in zig-zag order.
-static const float CSFChroma_float[64] = 
+static const float CSFChroma_float[64] =
 {
     1.000000f, 0.944444f, 0.708333f, 0.361702f, 0.171717f, 0.171717f, 0.171717f, 0.171717f,
     0.944444f, 0.809524f, 0.653846f, 0.257576f, 0.171717f, 0.171717f, 0.171717f, 0.171717f,
@@ -164,7 +160,7 @@ static const float CSFChroma_float[64] =
 };
 
 /// @summary The result of multiplying the AAN_FDCT_Factors against CSFLuma.
-static const float FDCTLuma_float[64] = 
+static const float FDCTLuma_float[64] =
 {
     0.125000f, 0.131084f, 0.153072f, 0.106300f, 0.083333f, 0.063636f, 0.072461f, 0.118835f,
     0.120160f, 0.086627f, 0.078823f, 0.064539f, 0.055458f, 0.031641f, 0.044405f, 0.095023f,
@@ -177,7 +173,7 @@ static const float FDCTLuma_float[64] =
 };
 
 /// @summary The result of multiplying the AAN_FDCT_Factors against CSFChroma.
-static const float FDCTChroma_float[64] = 
+static const float FDCTChroma_float[64] =
 {
     0.125000f, 0.085113f, 0.067766f, 0.038449f, 0.021465f, 0.027318f, 0.039661f, 0.077798f,
     0.085113f, 0.052595f, 0.045096f, 0.019741f, 0.015475f, 0.019696f, 0.028594f, 0.056090f,
@@ -215,109 +211,63 @@ static inline uint8_t clamp(int32_t v)
     return (uint8_t) ((v < 0) ? 0 : ((v > 255) ? 255 : v));
 }
 
-/// @summary Calculates the luma (Y) component from an RGB value.
-/// @param r The value of the red channel.
-/// @param g The value of the green channel.
-/// @param b The value of the blue channel.
-/// @return The value of the luma channel.
-static inline int32_t rgb_to_y(int32_t r, int32_t g, int32_t b)
-{
-    return (((r + (g << 1) + b) + 2) >> 2);
-}
-
-/// @summary Calculates the chroma-orange (Co) component from an RGB value.
-/// @param r The value of the red channel.
-/// @param g The value of the green channel.
-/// @param b The value of the blue channel.
-/// @return The value of the chroma-orange channel.
-static inline int32_t rgb_to_co(int32_t r, int32_t /*g*/, int32_t b)
-{
-    return ((((r << 1) - (b << 1)) + 2) >> 2);
-}
-
-/// @summary Calculates the chroma-green (Cg) component from an RGB value.
-/// @param r The value of the red channel.
-/// @param g The value of the green channel.
-/// @param b The value of the blue channel.
-/// @return The value of the chroma-green channel.
-static inline int32_t rgb_to_cg(int32_t r, int32_t g, int32_t b)
-{
-    return (((-r + (g << 1) - b) + 2) >> 2);
-}
-
-/// @summary Calculates the contribution from the chroma channels to red.
-/// @param co The chroma-orange channel.
-/// @param cg The chroma-green channel.
-/// @return The contribution to the red channel.
-static inline int32_t cocg_to_r(int32_t co, int32_t cg)
-{
-    return (co - cg);
-}
-
-/// @summary Calculates the contribution from the chroma channels to green.
-/// @param co The chroma-orange channel.
-/// @param cg The chroma-green channel.
-/// @return The contribution to the green channel.
-static inline int32_t cocg_to_g(int32_t /*co*/, int32_t cg)
-{
-    return (cg);
-}
-
-/// @summary Calculates the contribution from the chroma channels to blue.
-/// @param co The chroma-orange channel.
-/// @param cg The chroma-green channel.
-/// @return The contribution to the blue channel.
-static inline int32_t cocg_to_b(int32_t co, int32_t cg)
-{
-    return (-co - cg);
-}
-
 /// @summary Convert a block of 16x16 RGBA pixels to YCoCgA format. The alpha
 /// channel is extracted and stored in a separate output buffer.
-/// @param ycocg The 768 byte output buffer for storing the YCoCg channels.
+/// @param ycocg The 768 element output buffer for storing the YCoCg channels.
+/// The YCoCg data has a range of [-255, 255] for any 8-bit unsigned RGB tuple.
 /// @param alpha The 256 byte output buffer for storing the alpha channel.
 /// @param rgba The 1024 byte input buffer of 256 pixels in RGBA8 format.
 static void rgba_to_ycocga(
-    void       * restrict ycocg,
-    void       * restrict alpha,
-    void const * restrict rgba)
+    int16_t       * restrict ycocg,
+    uint8_t       * restrict alpha,
+    uint8_t const * restrict rgba)
 {
     uint8_t const * RGBA   = (uint8_t const*) rgba;
-    uint8_t       * YCoCg  = (uint8_t      *) ycocg;
+    int16_t       * YCoCg  = (int16_t      *) ycocg;
     uint8_t       * A      = (uint8_t      *) alpha;
     for (size_t i = 0; i < 256; ++i)
     {
-        int32_t r = *RGBA++;
-        int32_t g = *RGBA++;
-        int32_t b = *RGBA++;
+        int16_t r = *RGBA++;
+        int16_t g = *RGBA++;
+        int16_t b = *RGBA++;
         *A++      = *RGBA++;
-        *YCoCg++  = clamp(rgb_to_y (r, g, b));
-        *YCoCg++  = clamp(rgb_to_co(r, g, b) + 128);
-        *YCoCg++  = clamp(rgb_to_cg(r, g, b) + 128);
+        int16_t Co= r  -  b;
+        int16_t t = b  + (Co >> 1);
+        int16_t Cg= g  -  t;
+        int16_t Y = t  + (Cg >> 1);
+        *YCoCg++  = Y;
+        *YCoCg++  = Co;
+        *YCoCg++  = Cg;
     }
 }
 
 /// @summary Convert a block of 16x16 YCoCgA pixels to RGBA format. The alpha
 /// channel is stored separately from the luma and chroma channels.
 /// @param rgba The 1024 byte buffer to which RGBA values will be written.
-/// @param ycocg The 768 byte input buffer storing the YCoCg channels.
+/// @param ycocg The 768 byte input buffer storing the YCoCg channels. The 
+/// YCoCg data has a range of [-255, 255] for any 8-bit unsigned RGB tuple; the
+/// Y channel is always in [0, 255] while Co and Cg are in [-255, 255].
 /// @param alpha The 256 byte buffer storing the alpha channel.
 static void ycocga_to_rgba(
-    void       *          rgba,
-    void const * restrict ycocg,
-    void const * restrict alpha)
+    uint8_t       *          rgba,
+    int16_t const * restrict ycocg,
+    uint8_t const * restrict alpha)
 {
-    uint8_t const *YCoCg  = (uint8_t const*) ycocg;
+    int16_t const *YCoCg  = (int16_t const*) ycocg;
     uint8_t const *A      = (uint8_t const*) alpha;
     uint8_t       *RGBA   = (uint8_t      *) rgba;
     for (size_t i = 0; i < 256; ++i)
     {
-        int32_t y = *YCoCg++;
-        int32_t co= *YCoCg++ - 128;
-        int32_t cg= *YCoCg++ - 128;
-        *RGBA++   = clamp(y  + cocg_to_r(co, cg));
-        *RGBA++   = clamp(y  + cocg_to_g(co, cg));
-        *RGBA++   = clamp(y  + cocg_to_b(co, cg));
+        int16_t y =*YCoCg++;
+        int16_t co=*YCoCg++;
+        int16_t cg=*YCoCg++;
+        int16_t t = y  - (cg >> 1);
+        int16_t g = cg +  t;
+        int16_t b = t  - (co >> 1);
+        int16_t r = b  +  co;
+        *RGBA++   = (uint8_t) r;
+        *RGBA++   = (uint8_t) g;
+        *RGBA++   = (uint8_t) b;
         *RGBA++   = *A++;
     }
 }
@@ -431,12 +381,12 @@ static void csf_from_qtable(
 }
 
 /// @summary Calculates quantization tables for FDCT and IDCT that account for
-/// the scaling introduced by the AA&N methods. The FDCT and IDCT each scale 
-/// 8-bit input values by 2^3 (=8); this function includes a baked in de-scale 
+/// the scaling introduced by the AA&N methods. The FDCT and IDCT each scale
+/// 8-bit input values by 2^3 (=8); this function includes a baked in de-scale
 /// by 8 for use after the FDCT and a before using a value as input to the IDCT.
-/// @param Qidct A 64-element array that will store the scaling and 
+/// @param Qidct A 64-element array that will store the scaling and
 /// quantization coefficients for use with the IDCT method.
-/// @param Qfdct A 64-element array that will store the scaling and 
+/// @param Qfdct A 64-element array that will store the scaling and
 /// quantization coefficients for use with the FDCT method.
 /// @param CSFTable A 64-element array specifying the Contrast Sensitivity
 /// Function coefficients generated from the quantization table such as those
@@ -463,23 +413,23 @@ static void scaled_qtable_float(
     }
 }
 
-/// @summary Calculates quantization tables for FDCT and IDCT that account for 
+/// @summary Calculates quantization tables for FDCT and IDCT that account for
 /// the scaling introduced by the FDCT and IDCT. The FDCT and IDCT each scale
 /// input values by 2^3 (=8); this function includes a baked in de-scale by 8
-/// for use after the DCT (divide each DCT coefficient by the scaled qtable 
+/// for use after the DCT (divide each DCT coefficient by the scaled qtable
 /// value) and before the IDCT (multiply each quantized DCT coefficient by the
-/// scaled qtable value). The scaled quantization tables are output using 
+/// scaled qtable value). The scaled quantization tables are output using
 /// zig-zag ordering to increase the length of zero-runs.
-/// @param Qidct A 64-element array that will store the scaling and 
+/// @param Qidct A 64-element array that will store the scaling and
 /// quantization coefficients for use with the IDCT method.
-/// @param Qfdct A 64-element array that will store the scaling and 
+/// @param Qfdct A 64-element array that will store the scaling and
 /// quantization coefficients for use with the FDCT method.
-/// @param Qbase A 64-element array specifying the quantization coefficients 
+/// @param Qbase A 64-element array specifying the quantization coefficients
 /// as output by the quantization_table_base() function. Values in Qbase are in
 /// the range [1, 255].
 static void scaled_qtable_int16(
-    int16_t       * restrict Qidct, 
-    int16_t       * restrict Qfdct, 
+    int16_t       * restrict Qidct,
+    int16_t       * restrict Qfdct,
     int16_t const * restrict Qbase)
 {
     #define DCTSIZE 8U
@@ -493,7 +443,7 @@ static void scaled_qtable_int16(
 /// @summary Performs a 2D forward DCT on an 8x8 block of a single channel.
 /// This is performed after the RGBA pixels are converted to YCoCg, and after
 /// subsampling to 4:2:0, so this routine is called four times for luma and
-/// one time for each of the chroma channels. The output coefficients are not 
+/// one time for each of the chroma channels. The output coefficients are not
 /// quantized, and are scaled by a factor of 8 to the range [-8192, +8192].
 /// @param dst A 64-element array to be filled with DCT coefficients.
 /// @param src A 64-element array representing an 8x8 block of input samples.
@@ -507,7 +457,7 @@ static void fdct8x8f_base(float * restrict dst, float const * restrict src)
 
     float const *inp = (float const*) src;
     float       *out = (float*) dst;
-    
+
     for (int i = DCTSIZE - 1; i >= 0; --i)
     {
         // process rows in the input.
@@ -544,7 +494,7 @@ static void fdct8x8f_base(float * restrict dst, float const * restrict src)
         out      += DCTSIZE;
         inp      += DCTSIZE;
     }
-    
+
     out = dst;
     for (int i = DCTSIZE - 1; i >= 0; --i)
     {
@@ -586,13 +536,13 @@ static void fdct8x8f_base(float * restrict dst, float const * restrict src)
 /// @summary Performs a 2D forward DCT on an 8x8 block of a single channel.
 /// This is performed after the RGBA pixels are converted to YCoCg, and after
 /// subsampling to 4:2:0, so this routine is called four times for luma and
-/// one time for each of the chroma channels. The output coefficients are not 
-/// quantized, and are scaled by a factor of 8. This integer DCT is not 
+/// one time for each of the chroma channels. The output coefficients are not
+/// quantized, and are scaled by a factor of 8. This integer DCT is not
 /// perfectly reversable. For more information, see the following:
 /// http://fgiesen.wordpress.com/2013/11/04/bink-2-2-integer-dct-design-part-1/
 /// http://fgiesen.wordpress.com/2013/11/10/bink-2-2-integer-dct-design-part-2/
 /// https://github.com/rygorous/dct_blog/blob/master/bink_dct_B2.m
-/// Also, this DCT is not a derivative of AA&N, so the q-tables are computed 
+/// Also, this DCT is not a derivative of AA&N, so the q-tables are computed
 /// differently than they are for the AA&N method.
 /// @param dst A 64-element array to be filled with DCT coefficients.
 /// @param src A 64-element array representing an 8x8 block of input samples.
@@ -796,15 +746,15 @@ static void fdct8x8fq_base(
 /// @summary Performs a 2D forward DCT on an 8x8 block of a single channel.
 /// This is performed after the RGBA pixels are converted to YCoCg, and after
 /// subsampling to 4:2:0, so this routine is called four times for luma and
-/// one time for each of the chroma channels. Additionally, the output DCT 
+/// one time for each of the chroma channels. Additionally, the output DCT
 /// coefficients are quantized and descaled.
 /// @param dst A 64-element array to be filled with quantized DCT coefficients.
 /// @param src A 64-element array representing an 8x8 block of input.
-/// @param quant The 64-element scaled quantization coefficient array, as 
+/// @param quant The 64-element scaled quantization coefficient array, as
 /// output by the scaled_qtable_int16() function.
 static void fdct8x8iq_base(
-    int16_t       * restrict dst, 
-    int16_t const * restrict src, 
+    int16_t       * restrict dst,
+    int16_t const * restrict src,
     int16_t const * restrict quant)
 {
     #define DCTSIZE 8U
@@ -815,96 +765,110 @@ static void fdct8x8iq_base(
     for (int i = DCTSIZE - 1; i >= 0; --i)
     {
         // process rows in the input.
-        int32_t a0 = inp[0] + inp[7];
-        int32_t a4 = inp[0] - inp[7];
-        int32_t a1 = inp[1] + inp[6];
-        int32_t a5 = inp[1] - inp[6];
-        int32_t a2 = inp[2] + inp[5];
-        int32_t a6 = inp[2] - inp[5];
-        int32_t a3 = inp[3] + inp[4];
-        int32_t a7 = inp[3] - inp[4];
-        int32_t b0 = a0  +  a3;
-        int32_t b2 = a0  -  a3;
-        int32_t b1 = a1  +  a2;
-        int32_t b3 = a1  -  a2;
-        int32_t c0 = b0  +  b1;
-        int32_t c1 = b0  -  b1;
-        int32_t c2 = b2  + (b2 >> 2) + (b3 >> 1);
-        int32_t c3 =(b2 >> 1)  - b3  - (b3 >> 2);
-        int32_t b4 =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
-        int32_t b7 =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
-        int32_t b5 = a5        + a6  - (a6 >> 2) - (a6 >> 4);
-        int32_t b6 = a6        - a5  + (a5 >> 2) + (a5 >> 4);
-        int32_t c4 = b4  +  b5;
-        int32_t c5 = b4  -  b5;
-        int32_t c6 = b6  +  b7;
-        int32_t c7 = b6  -  b7;
-        int32_t d4 = c4;
-        int32_t d5 = c5  +  c7;
-        int32_t d6 = c5  -  c7;
-        int32_t d7 = c6;
-        out[0] = (int16_t) c0;
-        out[1] = (int16_t) d4;
-        out[2] = (int16_t) c2;
-        out[3] = (int16_t) d6;
-        out[4] = (int16_t) c1;
-        out[5] = (int16_t) d5;
-        out[6] = (int16_t) c3;
-        out[7] = (int16_t) d7;
-        out   +=  DCTSIZE;
-        inp   +=  DCTSIZE;
+        int32_t i0 =  inp[0];
+        int32_t i1 =  inp[1];
+        int32_t i2 =  inp[2];
+        int32_t i3 =  inp[3];
+        int32_t i4 =  inp[4];
+        int32_t i5 =  inp[5];
+        int32_t i6 =  inp[6];
+        int32_t i7 =  inp[7];
+        int32_t a0 =  i0  +  i7;
+        int32_t a1 =  i1  +  i6;
+        int32_t a2 =  i2  +  i5;
+        int32_t a3 =  i3  +  i4;
+        int32_t a4 =  i0  -  i7;
+        int32_t a5 =  i1  -  i6;
+        int32_t a6 =  i2  -  i5;
+        int32_t a7 =  i3  -  i4;
+        int32_t b0 =  a0  +  a3;
+        int32_t b1 =  a1  +  a2;
+        int32_t b2 =  a0  -  a3;
+        int32_t b3 =  a1  -  a2;
+        int32_t c0 =  b0  +  b1;
+        int32_t c1 =  b0  -  b1;
+        int32_t c2 =  b2  + (b2 >> 2) + (b3 >> 1);
+        int32_t c3 = (b2 >> 1)  - b3  - (b3 >> 2);
+        int32_t b4 = (a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
+        int32_t b7 = (a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
+        int32_t b5 =  a5        + a6  - (a6 >> 2) - (a6 >> 4);
+        int32_t b6 =  a6        - a5  + (a5 >> 2) + (a5 >> 4);
+        int32_t c4 =  b4  +  b5;
+        int32_t c5 =  b4  -  b5;
+        int32_t c6 =  b6  +  b7;
+        int32_t c7 =  b6  -  b7;
+        int32_t d4 =  c4;
+        int32_t d5 =  c5  +  c7;
+        int32_t d6 =  c5  -  c7;
+        int32_t d7 =  c6;
+        out[0]  = (int16_t) c0;
+        out[1]  = (int16_t) d4;
+        out[2]  = (int16_t) c2;
+        out[3]  = (int16_t) d6;
+        out[4]  = (int16_t) c1;
+        out[5]  = (int16_t) d5;
+        out[6]  = (int16_t) c3;
+        out[7]  = (int16_t) d7;
+        out    +=  DCTSIZE;
+        inp    +=  DCTSIZE;
     }
 
     out = dst;
     for (int i = DCTSIZE - 1; i >= 0; --i)
     {
         // process columns in the input.
-        int32_t a0 = out[DCTSIZE * 0] + out[DCTSIZE * 7];
-        int32_t a4 = out[DCTSIZE * 0] - out[DCTSIZE * 7];
-        int32_t a1 = out[DCTSIZE * 1] + out[DCTSIZE * 6];
-        int32_t a5 = out[DCTSIZE * 1] - out[DCTSIZE * 6];
-        int32_t a2 = out[DCTSIZE * 2] + out[DCTSIZE * 5];
-        int32_t a6 = out[DCTSIZE * 2] - out[DCTSIZE * 5];
-        int32_t a3 = out[DCTSIZE * 3] + out[DCTSIZE * 4];
-        int32_t a7 = out[DCTSIZE * 3] - out[DCTSIZE * 4];
-        int32_t b0 = a0  +  a3;
-        int32_t b2 = a0  -  a3;
-        int32_t b1 = a1  +  a2;
-        int32_t b3 = a1  -  a2;
-        int32_t c0 = b0  +  b1;
-        int32_t c1 = b0  -  b1;
-        int32_t c2 = b2  + (b2 >> 2) + (b3 >> 1);
-        int32_t c3 =(b2 >> 1)  - b3  - (b3 >> 2);
-        int32_t b4 =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
-        int32_t b7 =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
-        int32_t b5 = a5        + a6  - (a6 >> 2) - (a6 >> 4);
-        int32_t b6 = a6        - a5  + (a5 >> 2) + (a5 >> 4);
-        int32_t c4 = b4  +  b5;
-        int32_t c5 = b4  -  b5;
-        int32_t c6 = b6  +  b7;
-        int32_t c7 = b6  -  b7;
-        int32_t d4 = c4;
-        int32_t d5 = c5  +  c7;
-        int32_t d6 = c5  -  c7;
-        int32_t d7 = c6;
-        out[DCTSIZE * 0] = (int16_t)   (c0 >> 3); // descale
-        out[DCTSIZE * 1] = (int16_t)   (d4 >> 3); // descale
-        out[DCTSIZE * 2] = (int16_t)   (c2 >> 3); // descale
-        out[DCTSIZE * 3] = (int16_t)   (d6 >> 3); // descale
-        out[DCTSIZE * 4] = (int16_t)   (c1 >> 3); // descale
-        out[DCTSIZE * 5] = (int16_t)   (d5 >> 3); // descale
-        out[DCTSIZE * 6] = (int16_t)   (c3 >> 3); // descale
-        out[DCTSIZE * 7] = (int16_t)   (d7 >> 3); // descale
+        int32_t i0  = out[DCTSIZE * 0];
+        int32_t i1  = out[DCTSIZE * 1];
+        int32_t i2  = out[DCTSIZE * 2];
+        int32_t i3  = out[DCTSIZE * 3];
+        int32_t i4  = out[DCTSIZE * 4];
+        int32_t i5  = out[DCTSIZE * 5];
+        int32_t i6  = out[DCTSIZE * 6];
+        int32_t i7  = out[DCTSIZE * 7];
+        int32_t a0  = i0  +  i7;
+        int32_t a1  = i1  +  i6;
+        int32_t a2  = i2  +  i5;
+        int32_t a3  = i3  +  i4;
+        int32_t a4  = i0  -  i7;
+        int32_t a5  = i1  -  i6;
+        int32_t a6  = i2  -  i5;
+        int32_t a7  = i3  -  i4;
+        int32_t b0  = a0  +  a3;
+        int32_t b1  = a1  +  a2;
+        int32_t b2  = a0  -  a3;
+        int32_t b3  = a1  -  a2;
+        int32_t c0  = b0  +  b1;
+        int32_t c1  = b0  -  b1;
+        int32_t c2  = b2  + (b2 >> 2) + (b3 >> 1);
+        int32_t c3  =(b2 >> 1)  - b3  - (b3 >> 2);
+        int32_t b4  =(a7 >> 2)  + a4  + (a4 >> 2) - (a4 >> 4);
+        int32_t b7  =(a4 >> 2)  - a7  - (a7 >> 2) + (a7 >> 4);
+        int32_t b5  = a5        + a6  - (a6 >> 2) - (a6 >> 4);
+        int32_t b6  = a6        - a5  + (a5 >> 2) + (a5 >> 4);
+        int32_t c4  = b4  +  b5;
+        int32_t c5  = b4  -  b5;
+        int32_t c6  = b6  +  b7;
+        int32_t c7  = b6  -  b7;
+        int32_t d4  = c4;
+        int32_t d5  = c5  +  c7;
+        int32_t d6  = c5  -  c7;
+        int32_t d7  = c6;
+        out[DCTSIZE * 0]  = (int16_t) c0;
+        out[DCTSIZE * 1]  = (int16_t) d4;
+        out[DCTSIZE * 2]  = (int16_t) c2;
+        out[DCTSIZE * 3]  = (int16_t) d6;
+        out[DCTSIZE * 4]  = (int16_t) c1;
+        out[DCTSIZE * 5]  = (int16_t) d5;
+        out[DCTSIZE * 6]  = (int16_t) c3;
+        out[DCTSIZE * 7]  = (int16_t) d7;
         out++;
     }
-
-    // quantize and descale the DCT coefficients.
     for (size_t i = 0;  i < DCTSIZE * DCTSIZE; ++i)
-        dst[i] /= quant[i];
+        dst[i]   /= quant[i];
 }
 
 /// @summary Performs an inverse 2D DCT on an 8x8 block of DCT coefficients to
-/// retrieve sample values. The DCT coefficients are assumed to have been 
+/// retrieve sample values. The DCT coefficients are assumed to have been
 /// de-quantized, and to have been scaled down by a factor of 8.
 /// @summary dst A 64-element array where the output will be written.
 /// @summary src A 64-element array of dequantized DCT coefficient values.
@@ -1004,8 +968,8 @@ static void idct8x8f_base(float * restrict dst, float const * restrict src)
 }
 
 /// @summary Performs an inverse 2D DCT on an 8x8 block of DCT coefficients to
-/// retrieve sample values. The DCT coefficients are assumed to have been 
-/// de-quantized, and to have been scaled down by a factor of 8. The integer 
+/// retrieve sample values. The DCT coefficients are assumed to have been
+/// de-quantized, and to have been scaled down by a factor of 8. The integer
 /// DCT is not perfectly reversable. For more information, see:
 /// http://fgiesen.wordpress.com/2013/11/04/bink-2-2-integer-dct-design-part-1/
 /// http://fgiesen.wordpress.com/2013/11/10/bink-2-2-integer-dct-design-part-2/
@@ -1018,7 +982,7 @@ static void idct8x8i_base(int16_t * restrict dst, int16_t const * restrict src)
     #define COLUMNI(i)   (inp[DCTSIZE*i])
 
     int16_t        workspace[64];
-    int16_t const *inp = (int16_t const*) src; 
+    int16_t const *inp = (int16_t const*) src;
     int16_t       *wsp = (int16_t*) workspace;
 
     for (size_t i = DCTSIZE; i > 0; --i)
@@ -1215,60 +1179,63 @@ static void idct8x8fd_base(
 }
 
 /// @summary Performs an inverse 2D DCT on an 8x8 block of DCT coefficients to
-/// retrieve sample values. The DCT coefficients are assumed to have been 
-/// de-quantized, and to have been scaled down by a factor of 8. The integer 
+/// retrieve sample values. The DCT coefficients are assumed to have been
+/// de-quantized, and to have been scaled down by a factor of 8. The integer
 /// DCT is not perfectly reversable. For more information, see:
 /// http://fgiesen.wordpress.com/2013/11/04/bink-2-2-integer-dct-design-part-1/
 /// http://fgiesen.wordpress.com/2013/11/10/bink-2-2-integer-dct-design-part-2/
 /// https://github.com/rygorous/dct_blog/blob/master/bink_idct_B2_partial.m
 /// @summary dst A 64-element array where the output will be written.
 /// @summary src A 64-element array of dequantized DCT coefficient values.
-/// @summary quant The 64-element scaled quantization coefficient array, as 
+/// @summary quant The 64-element scaled quantization coefficient array, as
 /// output by the scaled_qtable_int16() function.
 static void idct8x8id_base(
-    int16_t       * restrict dst, 
-    int16_t const * restrict src, 
+    int16_t       * restrict dst,
+    int16_t const * restrict src,
     int16_t const * restrict quant)
 {
     #define DCTSIZE       8U
-    #define COLUMNID(i)  (inp[DCTSIZE*i] * qtp[DCTSIZE*i])
+    #define COLUMNID(x)  (inp[DCTSIZE*x] * qtp[DCTSIZE*x])
 
-    int16_t        workspace[64];
+    int32_t        workspace[64];
     int16_t const *qtp = (int16_t const*) quant;
-    int16_t const *inp = (int16_t const*) src; 
-    int16_t       *wsp = (int16_t*) workspace;
+    int16_t const *inp = (int16_t const*) src;
+    int32_t       *wsp = (int32_t*) workspace;
+
+    // @note: intermediate values are stored in 32-bit integers in C
+    // since overflow of signed integer values is technically undefined.
 
     for (size_t i = DCTSIZE; i > 0; --i)
     {
         // process columns from the input; write the result to workspace.
-        int16_t c0 = COLUMNID(0);
-        int16_t d4 = COLUMNID(1);
-        int16_t c2 = COLUMNID(2);
-        int16_t d6 = COLUMNID(3);
-        int16_t c1 = COLUMNID(4);
-        int16_t d5 = COLUMNID(5);
-        int16_t c3 = COLUMNID(6);
-        int16_t d7 = COLUMNID(7);
-        int16_t c4 = d4;
-        int16_t c5 = d5 + d6;
-        int16_t c7 = d5 - d6;
-        int16_t c6 = d7;
-        int16_t b4 = c4 + c5;
-        int16_t b5 = c4 - c5;
-        int16_t b6 = c6 + c7;
-        int16_t b7 = c6 - c7;
-        int16_t b0 = c0 + c1;
-        int16_t b1 = c0 - c1;
-        int16_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
-        int16_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
-        int16_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
-        int16_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
-        int16_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
-        int16_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
-        int16_t a0 = b0 + b2;
-        int16_t a3 = b0 - b2;
-        int16_t a1 = b1 + b3;
-        int16_t a2 = b1 - b3;
+        int32_t c0 = COLUMNID(0);
+        int32_t d4 = COLUMNID(1);
+        int32_t c2 = COLUMNID(2);
+        int32_t d6 = COLUMNID(3);
+        int32_t c1 = COLUMNID(4);
+        int32_t d5 = COLUMNID(5);
+        int32_t c3 = COLUMNID(6);
+        int32_t d7 = COLUMNID(7);
+        int32_t c4 = d4;
+        int32_t c5 = d5 + d6;
+        int32_t c7 = d5 - d6;
+        int32_t c6 = d7;
+        int32_t b4 = c4 + c5;
+        int32_t b5 = c4 - c5;
+        int32_t b6 = c6 + c7;
+        int32_t b7 = c6 - c7;
+        int32_t b0 = c0 + c1;
+        int32_t b1 = c0 - c1;
+        int32_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
+        int32_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
+        int32_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
+        int32_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
+        int32_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
+        int32_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
+        int32_t a0 = b0 + b2;
+        int32_t a3 = b0 - b2;
+        int32_t a1 = b1 + b3;
+        int32_t a2 = b1 - b3;
         wsp[DCTSIZE*0]  = a0 + a4;
         wsp[DCTSIZE*1]  = a1 + a5;
         wsp[DCTSIZE*2]  = a2 + a6;
@@ -1285,42 +1252,42 @@ static void idct8x8id_base(
     for (size_t i = 0; i < DCTSIZE; ++i)
     {
         // now process rows from the work array; write the result to dst.
-        int16_t c0 = wsp[0];
-        int16_t d4 = wsp[1];
-        int16_t c2 = wsp[2];
-        int16_t d6 = wsp[3];
-        int16_t c1 = wsp[4];
-        int16_t d5 = wsp[5];
-        int16_t c3 = wsp[6];
-        int16_t d7 = wsp[7];
-        int16_t c4 = d4;
-        int16_t c5 = d5 + d6;
-        int16_t c7 = d5 - d6;
-        int16_t c6 = d7;
-        int16_t b4 = c4 + c5;
-        int16_t b5 = c4 - c5;
-        int16_t b6 = c6 + c7;
-        int16_t b7 = c6 - c7;
-        int16_t b0 = c0 + c1;
-        int16_t b1 = c0 - c1;
-        int16_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
-        int16_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
-        int16_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
-        int16_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
-        int16_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
-        int16_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
-        int16_t a0 = b0 + b2;
-        int16_t a3 = b0 - b2;
-        int16_t a1 = b1 + b3;
-        int16_t a2 = b1 - b3;
-        dst[0]     =(a0 + a4) >> 3;  // descale
-        dst[1]     =(a1 + a5) >> 3;  // descale
-        dst[2]     =(a2 + a6) >> 3;  // descale
-        dst[3]     =(a3 + a7) >> 3;  // descale
-        dst[4]     =(a3 - a7) >> 3;  // descale
-        dst[5]     =(a2 - a6) >> 3;  // descale
-        dst[6]     =(a1 - a5) >> 3;  // descale
-        dst[7]     =(a0 - a4) >> 3;  // descale
+        int32_t c0 = wsp[0];
+        int32_t d4 = wsp[1];
+        int32_t c2 = wsp[2];
+        int32_t d6 = wsp[3];
+        int32_t c1 = wsp[4];
+        int32_t d5 = wsp[5];
+        int32_t c3 = wsp[6];
+        int32_t d7 = wsp[7];
+        int32_t c4 = d4;
+        int32_t c5 = d5 + d6;
+        int32_t c7 = d5 - d6;
+        int32_t c6 = d7;
+        int32_t b4 = c4 + c5;
+        int32_t b5 = c4 - c5;
+        int32_t b6 = c6 + c7;
+        int32_t b7 = c6 - c7;
+        int32_t b0 = c0 + c1;
+        int32_t b1 = c0 - c1;
+        int32_t b2 = c2 +(c2 >> 2) + (c3 >> 1);
+        int32_t b3 =(c2 >> 1) - c3 - (c3 >> 2);
+        int32_t a4 =(b7 >> 2) + b4 + (b4 >> 2) - (b4 >> 4);
+        int32_t a7 =(b4 >> 2) - b7 - (b7 >> 2) + (b7 >> 4);
+        int32_t a5 = b5       - b6 + (b6 >> 2) + (b6 >> 4);
+        int32_t a6 = b6       + b5 - (b5 >> 2) - (b5 >> 4);
+        int32_t a0 = b0 + b2;
+        int32_t a3 = b0 - b2;
+        int32_t a1 = b1 + b3;
+        int32_t a2 = b1 - b3;
+        dst[0]     =(int16_t) (a0 + a4);
+        dst[1]     =(int16_t) (a1 + a5);
+        dst[2]     =(int16_t) (a2 + a6);
+        dst[3]     =(int16_t) (a3 + a7);
+        dst[4]     =(int16_t) (a3 - a7);
+        dst[5]     =(int16_t) (a2 - a6);
+        dst[6]     =(int16_t) (a1 - a5);
+        dst[7]     =(int16_t) (a0 - a4);
         dst       += DCTSIZE;
         wsp       += DCTSIZE;
     }
@@ -1329,74 +1296,74 @@ static void idct8x8id_base(
 /// @summary Loads an 8x8 sub-block from a 16x16 block of pixels. This routine
 /// is used to grab sub-blocks of the luma channel.
 /// @param samples A 64-element array used to store the sampled data.
-/// @param ycocg The 768 byte, 16x16 array of YCoCg pixel data being sampled.
+/// @param ycocg The 768 element array of YCoCg pixel data being sampled.
 /// @param x The quadrant of the sub-block to sample, 0 = left, 1 = right.
 /// @param y The quadrant of the sub-block to sample, 0 = top, 1 = bottom.
 /// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
 static void subblock_float(
-    float      * restrict samples,
-    void const * restrict ycocg,
-    size_t                x,
-    size_t                y,
-    size_t                c)
+    float         * restrict samples,
+    int16_t const * restrict ycocg,
+    size_t                   x,
+    size_t                   y,
+    size_t                   c)
 {
-    uint8_t const *YCoCg = (uint8_t const*) ycocg;
-    uint8_t const *src   = NULL;
+    int16_t const *YCoCg = (int16_t const*) ycocg;
+    int16_t const *src   = NULL;
     float         *dst   = samples;
 
-    x = (x * 24)  + c; // 24 bytes-per-row in an 8x8 sub-block
-    y = (y *  8);      //  8 columns-per-row in an 8x8 sub-block
+    // each column has three elements, so a row has 16 * 3 = 48 elements.
+    // convert x to a column index by multiplying by 8 * 3 = 24 for x[0, 1].
+    // convert y to a row index by multiplying by 8 for y[0, 1].
+    x = (x * 24)  + c;
+    y = (y *  8);
     for (size_t i = 0; i < 8; ++i)
     {
-        // 48  = 16 pixels/row x 3 bytes/pixel in the source data.
-        // we subtract 128 because the DCT expects values centered
-        // at zero; that is, in the range [-128, 127] not [0, 255].
          src   =&YCoCg[(y + i)  *  48] + x;
-        *dst++ =   src[(0 * 3)] - 128.0f;
-        *dst++ =   src[(1 * 3)] - 128.0f;
-        *dst++ =   src[(2 * 3)] - 128.0f;
-        *dst++ =   src[(3 * 3)] - 128.0f;
-        *dst++ =   src[(4 * 3)] - 128.0f;
-        *dst++ =   src[(5 * 3)] - 128.0f;
-        *dst++ =   src[(6 * 3)] - 128.0f;
-        *dst++ =   src[(7 * 3)] - 128.0f;
+        *dst++ =   src[(0 * 3)];
+        *dst++ =   src[(1 * 3)];
+        *dst++ =   src[(2 * 3)];
+        *dst++ =   src[(3 * 3)];
+        *dst++ =   src[(4 * 3)];
+        *dst++ =   src[(5 * 3)];
+        *dst++ =   src[(6 * 3)];
+        *dst++ =   src[(7 * 3)];
     }
 }
 
 /// @summary Loads an 8x8 sub-block from a 16x16 block of pixels. This routine
 /// is used to grab sub-blocks of the luma channel.
 /// @param samples A 64-element array used to store the sampled data.
-/// @param ycocg The 768 byte, 16x16 array of YCoCg pixel data being sampled.
+/// @param ycocg The 768 element array of YCoCg pixel data being sampled.
 /// @param x The quadrant of the sub-block to sample, 0 = left, 1 = right.
 /// @param y The quadrant of the sub-block to sample, 0 = top, 1 = bottom.
 /// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
 static void subblock_int16(
-    int16_t    * restrict samples,
-    void const * restrict ycocg,
-    size_t                x,
-    size_t                y,
-    size_t                c)
+    int16_t       * restrict samples,
+    int16_t const * restrict ycocg,
+    size_t                   x,
+    size_t                   y,
+    size_t                   c)
 {
-    uint8_t const *YCoCg = (uint8_t const*) ycocg;
-    uint8_t const *src   = NULL;
+    int16_t const *YCoCg = (int16_t const*) ycocg;
+    int16_t const *src   = NULL;
     int16_t       *dst   = samples;
 
-    x = (x * 24)  + c; // 24 bytes-per-row in an 8x8 sub-block
-    y = (y *  8);      //  8 columns-per-row in an 8x8 sub-block
+    // each column has three elements, so a row has 16 * 3 = 48 elements.
+    // convert x to a column index by multiplying by 8 * 3 = 24 for x[0, 1].
+    // convert y to a row index by multiplying by 8 for y[0, 1].
+    x = (x * 24)  + c;
+    y = (y *  8);
     for (size_t i = 0; i < 8; ++i)
     {
-        // 48  = 16 pixels/row x 3 bytes/pixel in the source data.
-        // we subtract 128 because the DCT expects values centered
-        // at zero; that is, in the range [-128, 127] not [0, 255].
          src   =&YCoCg[(y + i)  *  48] + x;
-        *dst++ =   src[(0 * 3)] - 128.0f;
-        *dst++ =   src[(1 * 3)] - 128.0f;
-        *dst++ =   src[(2 * 3)] - 128.0f;
-        *dst++ =   src[(3 * 3)] - 128.0f;
-        *dst++ =   src[(4 * 3)] - 128.0f;
-        *dst++ =   src[(5 * 3)] - 128.0f;
-        *dst++ =   src[(6 * 3)] - 128.0f;
-        *dst++ =   src[(7 * 3)] - 128.0f;
+        *dst++ =   src[(0 * 3)];
+        *dst++ =   src[(1 * 3)];
+        *dst++ =   src[(2 * 3)];
+        *dst++ =   src[(3 * 3)];
+        *dst++ =   src[(4 * 3)];
+        *dst++ =   src[(5 * 3)];
+        *dst++ =   src[(6 * 3)];
+        *dst++ =   src[(7 * 3)];
     }
 }
 
@@ -1404,38 +1371,31 @@ static void subblock_int16(
 /// downsampling by half in each of the horizontal and vertical dimensions,
 /// such that the resulting 8x8 sub-block contains a downsampled version of the
 /// entire 16x16 source block, instead of just an 8x8 sub-region. This routine
-/// is used to subsample the chroma channels, Co and Cg.
+/// is used to subsample the chroma channels, Co and Cg to 4:2:0.
 /// @param samples A 64-element array used to store the sampled data.
-/// @param ycocg The 768 byte, 16x16 array of YCoCg pixel data being sampled.
+/// @param ycocg The 768 element array of YCoCg pixel data being sampled.
 /// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
 static void subsample_float(
-    float      * restrict samples,
-    void const * restrict ycocg,
-    size_t                c)
+    float         * restrict samples,
+    int16_t const * restrict ycocg,
+    size_t                   c)
 {
-    uint8_t const *YCoCg = (uint8_t const*) ycocg;
-    uint8_t const *src1  = NULL;
-    uint8_t const *src2  = NULL;
+    int16_t const *YCoCg = (int16_t const*) ycocg;
+    int16_t const *src1  = NULL;
+    int16_t const *src2  = NULL;
     float         *dst   = samples;
-    size_t         a     = 0;
-    size_t         b     = 2;
     for (size_t i = 0; i < 16; i += 2)
     {
-        // 48  = 16 pixels/row x 3 bytes/pixel in the source data.
-        // we're averaging the pixels for two rows to produce one output.
-        // we subtract 128 because the DCT expects values centered at
-        // zero; that is, in the range [-128, 127], instead of [0, 255].
          src1  =&YCoCg[(i + 0) * 48] + c;
          src2  =&YCoCg[(i + 1) * 48] + c;
-        *dst++ = ((src1[0 * 3] + src1[1 * 3] + src2[0 * 3] + src2[1 * 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[2 * 3] + src1[3 * 3] + src2[2 * 3] + src2[3 * 3] + b) >> 2) - 128.0f;
-        *dst++ = ((src1[4 * 3] + src1[5 * 3] + src2[4 * 3] + src2[5 * 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[6 * 3] + src1[7 * 3] + src2[6 * 3] + src2[7 * 3] + b) >> 2) - 128.0f;
-        *dst++ = ((src1[8 * 3] + src1[9 * 3] + src2[8 * 3] + src2[9 * 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[10* 3] + src1[11* 3] + src2[10* 3] + src2[11* 3] + b) >> 2) - 128.0f;
-        *dst++ = ((src1[12* 3] + src1[13* 3] + src2[12* 3] + src2[13* 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[14* 3] + src1[15* 3] + src2[14* 3] + src2[15* 3] + b) >> 2) - 128.0f;
-        size_t t = a; a = b; b = t;
+        *dst++ = ((src1[0 * 3] + src1[1 * 3] + src2[0 * 3] + src2[1 * 3]) >> 2);
+        *dst++ = ((src1[2 * 3] + src1[3 * 3] + src2[2 * 3] + src2[3 * 3]) >> 2);
+        *dst++ = ((src1[4 * 3] + src1[5 * 3] + src2[4 * 3] + src2[5 * 3]) >> 2);
+        *dst++ = ((src1[6 * 3] + src1[7 * 3] + src2[6 * 3] + src2[7 * 3]) >> 2);
+        *dst++ = ((src1[8 * 3] + src1[9 * 3] + src2[8 * 3] + src2[9 * 3]) >> 2);
+        *dst++ = ((src1[10* 3] + src1[11* 3] + src2[10* 3] + src2[11* 3]) >> 2);
+        *dst++ = ((src1[12* 3] + src1[13* 3] + src2[12* 3] + src2[13* 3]) >> 2);
+        *dst++ = ((src1[14* 3] + src1[15* 3] + src2[14* 3] + src2[15* 3]) >> 2);
     }
 }
 
@@ -1445,47 +1405,40 @@ static void subsample_float(
 /// entire 16x16 source block, instead of just an 8x8 sub-region. This routine
 /// is used to subsample the chroma channels, Co and Cg.
 /// @param samples A 64-element array used to store the sampled data.
-/// @param ycocg The 768 byte, 16x16 array of YCoCg pixel data being sampled.
+/// @param ycocg The 768 element array of YCoCg pixel data being sampled.
 /// @param c The channel index to sample, 0 = Y, 1 = Co, 2 = Cg.
 static void subsample_int16(
-    int16_t    * restrict samples,
-    void const * restrict ycocg,
-    size_t                c)
+    int16_t       * restrict samples,
+    int16_t const * restrict ycocg,
+    size_t                   c)
 {
-    uint8_t const *YCoCg = (uint8_t const*) ycocg;
-    uint8_t const *src1  = NULL;
-    uint8_t const *src2  = NULL;
+    int16_t const *YCoCg = (int16_t const*) ycocg;
+    int16_t const *src1  = NULL;
+    int16_t const *src2  = NULL;
     int16_t       *dst   = samples;
-    size_t         a     = 0;
-    size_t         b     = 2;
     for (size_t i = 0; i < 16; i += 2)
     {
-        // 48  = 16 pixels/row x 3 bytes/pixel in the source data.
-        // we're averaging the pixels for two rows to produce one output.
-        // we subtract 128 because the DCT expects values centered at
-        // zero; that is, in the range [-128, 127], instead of [0, 255].
          src1  =&YCoCg[(i + 0) * 48] + c;
          src2  =&YCoCg[(i + 1) * 48] + c;
-        *dst++ = ((src1[0 * 3] + src1[1 * 3] + src2[0 * 3] + src2[1 * 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[2 * 3] + src1[3 * 3] + src2[2 * 3] + src2[3 * 3] + b) >> 2) - 128.0f;
-        *dst++ = ((src1[4 * 3] + src1[5 * 3] + src2[4 * 3] + src2[5 * 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[6 * 3] + src1[7 * 3] + src2[6 * 3] + src2[7 * 3] + b) >> 2) - 128.0f;
-        *dst++ = ((src1[8 * 3] + src1[9 * 3] + src2[8 * 3] + src2[9 * 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[10* 3] + src1[11* 3] + src2[10* 3] + src2[11* 3] + b) >> 2) - 128.0f;
-        *dst++ = ((src1[12* 3] + src1[13* 3] + src2[12* 3] + src2[13* 3] + a) >> 2) - 128.0f;
-        *dst++ = ((src1[14* 3] + src1[15* 3] + src2[14* 3] + src2[15* 3] + b) >> 2) - 128.0f;
-        size_t t = a; a = b; b = t;
+        *dst++ = ((src1[0 * 3] + src1[1 * 3] + src2[0 * 3] + src2[1 * 3]) >> 2);
+        *dst++ = ((src1[2 * 3] + src1[3 * 3] + src2[2 * 3] + src2[3 * 3]) >> 2);
+        *dst++ = ((src1[4 * 3] + src1[5 * 3] + src2[4 * 3] + src2[5 * 3]) >> 2);
+        *dst++ = ((src1[6 * 3] + src1[7 * 3] + src2[6 * 3] + src2[7 * 3]) >> 2);
+        *dst++ = ((src1[8 * 3] + src1[9 * 3] + src2[8 * 3] + src2[9 * 3]) >> 2);
+        *dst++ = ((src1[10* 3] + src1[11* 3] + src2[10* 3] + src2[11* 3]) >> 2);
+        *dst++ = ((src1[12* 3] + src1[13* 3] + src2[12* 3] + src2[13* 3]) >> 2);
+        *dst++ = ((src1[14* 3] + src1[15* 3] + src2[14* 3] + src2[15* 3]) >> 2);
     }
 }
 
-/// @summary Combine four packed 8x8 blocks stored in a contiguous array back 
+/// @summary Combine four packed 8x8 blocks stored in a contiguous array back
 /// into a single 16x16 block. This is used to undo the effect of splitting the
 /// luma channel from a 16x16 block into four 8x8 blocks.
 /// @param dst A 256 element array to store the output 16x16 block.
 /// @param src A 256 element array storing the packed 8x8 input blocks.
-static void merge_int16(int16_t * restrict dst, int16_t const * restrict src)
+static void merge_blocks_int16(int16_t * restrict dst, int16_t const * restrict src)
 {
-    // combine four 8x8 blocks stored in a contiguous array back into a 
+    // combine four 8x8 blocks stored in a contiguous array back into a
     // single 16x16 block. the 8x8 blocks are stored in natural order.
     int16_t const * restrict src0 = &src[0];     // src[0...63]
     int16_t const * restrict src1 = &src[64];    // src[64...127]
@@ -1518,7 +1471,7 @@ static void merge_int16(int16_t * restrict dst, int16_t const * restrict src)
 /// for easy merging with the luma channel values.
 /// @param dst A 256-element array to store the output 16x16 block.
 /// @param src A 64-element array specifying the 8x8 input block.
-static void scale_int16(int16_t * restrict dst, int16_t const * restrict src)
+static void scale_block_int16(int16_t * restrict dst, int16_t const * restrict src)
 {
     // scale an 8x8 block into a 16x16 block using pixel doubling.
     int16_t const * restrict srcRow  = src;
@@ -1539,6 +1492,12 @@ static void scale_int16(int16_t * restrict dst, int16_t const * restrict src)
         dstRow0    += 32;
         dstRow1    += 32;
     }
+}
+
+static void descale8x8i(int16_t *buffer)
+{
+    for (size_t i   = 0; i < 64; ++i)
+        buffer[i] >>= 6;
 }
 
 size_t tile_count(size_t *num_x, size_t *num_y, image_tiler_config_t const *config)
@@ -1696,8 +1655,8 @@ void quantization_table_chroma(int16_t *Qchroma, int32_t quality)
 }
 
 void quantization_table_scale(
-    float         * restrict Qidct, 
-    float         * restrict Qfdct, 
+    float         * restrict Qidct,
+    float         * restrict Qfdct,
     int16_t const * restrict Qbase)
 {
     float  CSFtable[64];
@@ -1706,8 +1665,8 @@ void quantization_table_scale(
 }
 
 void quantization_table_scale(
-    int16_t       * restrict Qidct, 
-    int16_t       * restrict Qfdct, 
+    int16_t       * restrict Qidct,
+    int16_t       * restrict Qfdct,
     int16_t const * restrict Qbase)
 {
     scaled_qtable_int16(Qidct, Qfdct, Qbase);
@@ -1768,16 +1727,16 @@ void fdct8x8i(int16_t * restrict dst, int16_t const * restrict src)
 }
 
 void fdct8x8fq(
-    float         * restrict dst, 
-    float   const * restrict src, 
+    float         * restrict dst,
+    float   const * restrict src,
     float   const * restrict Qfdct)
 {
     fdct8x8fq_base(dst, src, Qfdct);
 }
 
 void fdct8x8iq(
-    int16_t       * restrict dst, 
-    int16_t const * restrict src, 
+    int16_t       * restrict dst,
+    int16_t const * restrict src,
     int16_t const * restrict Qfdct)
 {
     fdct8x8iq_base(dst, src, Qfdct);
@@ -1794,16 +1753,16 @@ void idct8x8i(int16_t * restrict dst, int16_t const * restrict src)
 }
 
 void idct8x8fd(
-    float         * restrict dst, 
-    float   const * restrict src, 
+    float         * restrict dst,
+    float   const * restrict src,
     float   const * restrict Qidct)
 {
     idct8x8fd_base(dst, src, Qidct);
 }
 
 void idct8x8id(
-    int16_t       * restrict dst, 
-    int16_t const * restrict src, 
+    int16_t       * restrict dst,
+    int16_t const * restrict src,
     int16_t const * restrict Qidct)
 {
     idct8x8id_base(dst, src, Qidct);
@@ -1813,12 +1772,12 @@ void encode16x16f(
     float         * restrict Y,
     float         * restrict Co,
     float         * restrict Cg,
-    float         * restrict A,
+    uint8_t       * restrict A,
     float   const * restrict Qluma,
     float   const * restrict Qchroma,
     uint8_t const * restrict RGBA)
 {
-    uint8_t YCoCg[768];
+    int16_t YCoCg[768];
     float   sample[64];
 
     // perform colorspace conversion and extract the alpha channel.
@@ -1828,10 +1787,10 @@ void encode16x16f(
     subblock_float(sample,  YCoCg,  0, 0, 0);
     fdct8x8fq_base(&Y[0],   sample, Qluma);
 
-    subblock_float(sample,  YCoCg,  0, 1, 0);
+    subblock_float(sample,  YCoCg,  1, 0, 0);
     fdct8x8fq_base(&Y[64],  sample, Qluma);
 
-    subblock_float(sample,  YCoCg,  1, 0, 0);
+    subblock_float(sample,  YCoCg,  0, 1, 0);
     fdct8x8fq_base(&Y[128], sample, Qluma);
 
     subblock_float(sample,  YCoCg,  1, 1, 0);
@@ -1847,15 +1806,15 @@ void encode16x16f(
 }
 
 void encode16x16i(
-    int16_t       * restrict Y, 
-    int16_t       * restrict Co, 
-    int16_t       * restrict Cg, 
-    uint8_t       * restrict A, 
-    int16_t const * restrict Qluma, 
-    int16_t const * restrict Qchroma, 
+    int16_t       * restrict Y,
+    int16_t       * restrict Co,
+    int16_t       * restrict Cg,
+    uint8_t       * restrict A,
+    int16_t const * restrict Qluma,
+    int16_t const * restrict Qchroma,
     uint8_t const * restrict RGBA)
 {
-    uint8_t YCoCg[768];
+    int16_t YCoCg[768];
     int16_t sample[64];
 
     // perform colorspace conversion and extract the alpha channel.
@@ -1865,10 +1824,10 @@ void encode16x16i(
     subblock_int16(sample,  YCoCg,  0, 0, 0);
     fdct8x8iq_base(&Y[0],   sample, Qluma);
 
-    subblock_int16(sample,  YCoCg,  0, 1, 0);
+    subblock_int16(sample,  YCoCg,  1, 0, 0);
     fdct8x8iq_base(&Y[64],  sample, Qluma);
 
-    subblock_int16(sample,  YCoCg,  1, 0, 0);
+    subblock_int16(sample,  YCoCg,  0, 1, 0);
     fdct8x8iq_base(&Y[128], sample, Qluma);
 
     subblock_int16(sample,  YCoCg,  1, 1, 0);
@@ -1884,11 +1843,11 @@ void encode16x16i(
 }
 
 void decode16x16i_rgb(
-    uint8_t       * restrict RGB, 
+    uint8_t       * restrict RGB,
     int16_t const * restrict Y,
-    int16_t const * restrict Co, 
-    int16_t const * restrict Cg, 
-    int16_t const * restrict Qluma, 
+    int16_t const * restrict Co,
+    int16_t const * restrict Cg,
+    int16_t const * restrict Qluma,
     int16_t const * restrict Qchroma)
 {
     int16_t Yd[256]; // buffer for the dequantized luma blocks
@@ -1904,39 +1863,43 @@ void decode16x16i_rgb(
     idct8x8id_base(&Yd[64],  &Y[64],  Qluma);
     idct8x8id_base(&Yd[128], &Y[128], Qluma);
     idct8x8id_base(&Yd[192], &Y[192], Qluma);
-    merge_int16(Ym, Yd);
+    merge_blocks_int16(Ym, Yd);
 
-    // dequantize the 8x8 chroma-orange block, and then 
+    // dequantize the 8x8 chroma-orange block, and then
     // scale it back up to 16x16 to match the luma channel.
     // do the same for the the chroma-green channel.
     idct8x8id_base(Od, Co, Qchroma);
     idct8x8id_base(Gd, Cg, Qchroma);
-    scale_int16(Os, Od);
-    scale_int16(Gs, Gd);
+    scale_block_int16(Os, Od);
+    scale_block_int16(Gs, Gd);
 
     // now convert from YCoCg back to RGB.
-    // adding 128 maps the YCoCg samples from [-128, 127], centered at 
-    // zero (which was required for the DCT/IDCT) back to [0, 255]. 
+    // adding 128 maps the YCoCg samples from [-128, 127], centered at
+    // zero (which was required for the DCT/IDCT) back to [0, 255].
     // the conversion for Co and Cg to RGB subtracts 128 from those values
     // again, so we only add 128 to the luma channel.
     for (size_t i = 0; i < 256; ++i)
     {
-        int32_t y = Ym[i] +128;
+        int32_t y = Ym[i];
         int32_t co= Os[i];
         int32_t cg= Gs[i];
-        *RGB++    = clamp(y + cocg_to_r(co, cg));
-        *RGB++    = clamp(y + cocg_to_g(co, cg));
-        *RGB++    = clamp(y + cocg_to_b(co, cg));
+        int16_t t = y  - (cg >> 1);
+        int16_t g = cg +  t;
+        int16_t b = t  - (co >> 1);
+        int16_t r = b  +  co;
+        *RGB++    = (uint8_t) r; // might need to clamp() because of IDCT...
+        *RGB++    = (uint8_t) g; // might need to clamp() because of IDCT...
+        *RGB++    = (uint8_t) b; // might need to clamp() because of IDCT...
     }
 }
 
 void decode16x16i_rgba(
-    uint8_t       * restrict RGBA, 
+    uint8_t       * restrict RGBA,
     int16_t const * restrict Y,
-    int16_t const * restrict Co, 
+    int16_t const * restrict Co,
     int16_t const * restrict Cg,
-    uint8_t const * restrict A,  
-    int16_t const * restrict Qluma, 
+    uint8_t const * restrict A,
+    int16_t const * restrict Qluma,
     int16_t const * restrict Qchroma)
 {
     int16_t Yd[256]; // buffer for the dequantized luma blocks
@@ -1949,32 +1912,42 @@ void decode16x16i_rgba(
     // dequantize and IDCT the four luma blocks into Yd.
     // merge them back into a single 16x16 block in Ym.
     idct8x8id_base(&Yd[0],   &Y[0],   Qluma);
+    descale8x8i   (&Yd[0]);
     idct8x8id_base(&Yd[64],  &Y[64],  Qluma);
+    descale8x8i   (&Yd[64]);
     idct8x8id_base(&Yd[128], &Y[128], Qluma);
+    descale8x8i   (&Yd[128]);
     idct8x8id_base(&Yd[192], &Y[192], Qluma);
-    merge_int16(Ym, Yd);
+    descale8x8i   (&Yd[192]);
+    merge_blocks_int16(Ym, Yd);
 
-    // dequantize the 8x8 chroma-orange block, and then 
+    // dequantize the 8x8 chroma-orange block, and then
     // scale it back up to 16x16 to match the luma channel.
     // do the same for the the chroma-green channel.
     idct8x8id_base(Od, Co, Qchroma);
+    descale8x8i   (Od);
     idct8x8id_base(Gd, Cg, Qchroma);
-    scale_int16(Os,Od);
-    scale_int16(Gs,Gd);
+    descale8x8i   (Gd);
+    scale_block_int16(Os,Od);
+    scale_block_int16(Gs,Gd);
 
     // now convert from YCoCg back to RGB.
-    // adding 128 maps the YCoCg samples from [-128, 127], centered at 
-    // zero (which was required for the DCT/IDCT) back to [0, 255]. 
+    // adding 128 maps the YCoCg samples from [-128, 127], centered at
+    // zero (which was required for the DCT/IDCT) back to [0, 255].
     // the conversion for Co and Cg to RGB subtracts 128 from those values
     // again, so we only add 128 to the luma channel.
     for (size_t i = 0; i < 256; ++i)
     {
-        int32_t y = Ym[i] +128;
+        int32_t y = Ym[i];
         int32_t co= Os[i];
         int32_t cg= Gs[i];
-        *RGBA++   = clamp(y + cocg_to_r(co, cg));
-        *RGBA++   = clamp(y + cocg_to_g(co, cg));
-        *RGBA++   = clamp(y + cocg_to_b(co, cg));
+        int16_t t = y  - (cg >> 1);
+        int16_t g = cg +  t;
+        int16_t b = t  - (co >> 1);
+        int16_t r = b  +  co;
+        *RGBA++   = (uint8_t) r; // might need to clamp() because of IDCT...
+        *RGBA++   = (uint8_t) g; // might need to clamp() because of IDCT...
+        *RGBA++   = (uint8_t) b; // might need to clamp() because of IDCT...
         *RGBA++   =*A++;
     }
 }
